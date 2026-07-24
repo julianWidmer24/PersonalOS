@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useDashboard, fmt } from '../../context/DashboardContext';
+import { useDashboard } from '../../context/DashboardContext';
+import { fmt } from '../../lib/dashboardHelpers';
 import { ModalShell } from '../shared/ModalShell';
 
 // Minimal Web Speech API typings (not in lib.dom for all targets)

@@ -1,47 +1,19 @@
--- Consolidate habit tracking into habit_logs (canonical schema).
--- Migrates any habit_completions data into habit_logs, then drops habit_completions.
--- Halts with an exception if both tables have data so the conflict can be reviewed.
+-- ⚠️ NEUTRALIZED — DO NOT RE-ENABLE THE OLD BODY ⚠️
+--
+-- This migration originally consolidated habit tracking into `habit_logs` and
+-- DROPPED `habit_completions`. That is unsafe: the live database and the entire
+-- frontend (src/context/DashboardContext.tsx) use `habit_completions` as the
+-- canonical habit-tracking table. Running the old body would drop the table the
+-- app depends on and cause silent data loss.
+--
+-- Decision (2026-07): `habit_completions` is canonical. `habit_logs` (created in
+-- 001) is unused and left in place harmlessly. The reproducible, non-destructive
+-- definition of `habit_completions` now lives in 005_reconcile_live_schema.sql.
+--
+-- This file is intentionally a no-op so that applying the full migration folder
+-- can never drop `habit_completions`.
 
 do $$
-declare
-  has_completions   boolean;
-  logs_count        bigint;
-  completions_count bigint;
 begin
-  select exists (
-    select 1 from information_schema.tables
-    where table_schema = 'public' and table_name = 'habit_completions'
-  ) into has_completions;
-
-  if not has_completions then
-    raise notice 'habit_completions does not exist — nothing to consolidate.';
-    return;
-  end if;
-
-  select count(*) from public.habit_logs        into logs_count;
-  select count(*) from public.habit_completions into completions_count;
-
-  raise notice 'habit_logs=%, habit_completions=%', logs_count, completions_count;
-
-  if logs_count > 0 and completions_count > 0 then
-    raise exception
-      'Both tables have data (habit_logs=%, habit_completions=%). Halting — resolve manually before re-running.',
-      logs_count, completions_count;
-  end if;
-
-  if completions_count > 0 then
-    insert into public.habit_logs (id, user_id, habit_id, date, completed_subtasks, is_complete)
-    select
-      id,
-      user_id,
-      habit_id,
-      completed_date,
-      coalesce(completed_subtasks, '[]'::jsonb),
-      coalesce(fully_completed, false)
-    from public.habit_completions;
-    raise notice 'Migrated % rows from habit_completions to habit_logs', completions_count;
-  end if;
-
-  drop table public.habit_completions;
-  raise notice 'Dropped habit_completions';
+  raise notice '002 is a no-op. habit_completions is canonical; see 005_reconcile_live_schema.sql.';
 end$$;

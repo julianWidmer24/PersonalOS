@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useDashboard, PRIORITY_COLORS } from '../context/DashboardContext';
+import { useDashboard } from '../context/DashboardContext';
+import { PRIORITY_COLORS } from '../lib/dashboardHelpers';
 import type { Project, Task } from '../types';
 import { Card } from './shared/Card';
 import { IconBtn } from './shared/IconBtn';

@@ -11,7 +11,7 @@ function loadMealPlan(): MealPlanData {
   try {
     const v = JSON.parse(localStorage.getItem(MEALPLAN_KEY) || 'null');
     if (v && v.meals) return v;
-  } catch {}
+  } catch { /* ignore */ }
   return SEED_MEAL_PLAN;
 }
 
@@ -48,7 +48,7 @@ export function MealPlan() {
   const [checked, setChecked] = useState(new Set<string>());
 
   useEffect(() => {
-    try { localStorage.setItem(MEALPLAN_KEY, JSON.stringify(plan)); } catch {}
+    try { localStorage.setItem(MEALPLAN_KEY, JSON.stringify(plan)); } catch { /* ignore */ }
   }, [plan]);
 
   const generate = async () => {

@@ -164,7 +164,7 @@ export function PhysicalActivity() {
     r.onload = () => {
       const entry: PhysiqueEntry = { week: 14, label: 'Week 14', date: 'Today', dataUrl: r.result as string };
       setThisWeek(entry);
-      try { localStorage.setItem('pos:physique:current', JSON.stringify(entry)); } catch {}
+      try { localStorage.setItem('pos:physique:current', JSON.stringify(entry)); } catch { /* ignore */ }
     };
     r.readAsDataURL(file);
   };
@@ -173,7 +173,7 @@ export function PhysicalActivity() {
     if (!thisWeek) return;
     setEntries(es => [thisWeek, ...es]);
     setThisWeek(null);
-    try { localStorage.removeItem('pos:physique:current'); } catch {}
+    try { localStorage.removeItem('pos:physique:current'); } catch { /* ignore */ }
   };
 
   return (

@@ -7,14 +7,14 @@ function loadPhysique(): PhysiqueEntry[] {
   try {
     const v = JSON.parse(localStorage.getItem(PHYSIQUE_KEY) || 'null');
     if (Array.isArray(v) && v.length) return v;
-  } catch {}
+  } catch { /* ignore */ }
   return [];
 }
 
 export function usePhysique(): [PhysiqueEntry[], React.Dispatch<React.SetStateAction<PhysiqueEntry[]>>] {
   const [entries, setEntries] = useState<PhysiqueEntry[]>(loadPhysique);
   useEffect(() => {
-    try { localStorage.setItem(PHYSIQUE_KEY, JSON.stringify(entries)); } catch {}
+    try { localStorage.setItem(PHYSIQUE_KEY, JSON.stringify(entries)); } catch { /* ignore */ }
   }, [entries]);
   return [entries, setEntries];
 }

@@ -1,4 +1,5 @@
-import { useDashboard, PRIORITY_COLORS } from '../context/DashboardContext';
+import { useDashboard } from '../context/DashboardContext';
+import { PRIORITY_COLORS } from '../lib/dashboardHelpers';
 import { Card } from './shared/Card';
 
 export function KeyTasks() {

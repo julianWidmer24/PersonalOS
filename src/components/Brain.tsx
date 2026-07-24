@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useDashboard, TAG_COLORS, PRIORITY_COLORS } from '../context/DashboardContext';
+import { useDashboard } from '../context/DashboardContext';
+import { TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
 import type { LifeArea, Task } from '../types';
 
 const LIFE_AREAS: LifeArea[] = [

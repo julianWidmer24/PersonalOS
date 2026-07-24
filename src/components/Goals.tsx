@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useDashboard, fmt } from '../context/DashboardContext';
+import { useDashboard } from '../context/DashboardContext';
+import { fmt } from '../lib/dashboardHelpers';
 import type { Goal } from '../types';
 import { Card } from './shared/Card';
 import { IconBtn } from './shared/IconBtn';

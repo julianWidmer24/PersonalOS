@@ -1,4 +1,4 @@
-import { useClock, fmt } from '../context/DashboardContext';
+import { useClock, fmt } from '../lib/dashboardHelpers';
 
 export function HeroGreeting({ variant = 'lg' }: { variant?: 'sm' | 'md' | 'lg' | 'hero' }) {
   const now = useClock();

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
-import { fmt } from '../context/DashboardContext';
+import { fmt } from '../lib/dashboardHelpers';
 import { Card } from './shared/Card';
 
 interface MealRow {

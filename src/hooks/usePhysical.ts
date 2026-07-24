@@ -50,7 +50,7 @@ function loadRoutine(): WorkoutRoutineData {
   try {
     const v = JSON.parse(localStorage.getItem(ROUTINE_KEY) || 'null');
     if (v && v.workouts?.length) return v;
-  } catch {}
+  } catch { /* ignore */ }
   return { workouts: [], raw: '', importedAt: '' };
 }
 
@@ -58,7 +58,7 @@ function loadLog(): WorkoutLog {
   try {
     const v = JSON.parse(localStorage.getItem(WORKOUT_LOG_KEY) || 'null');
     if (v && v.entries) return v;
-  } catch {}
+  } catch { /* ignore */ }
   const today = new Date();
   const entries: WorkoutLog['entries'] = {};
   const mkDate = (offset: number) => {
@@ -84,12 +84,12 @@ export function usePhysical() {
   };
 
   useEffect(() => {
-    try { localStorage.setItem(ROUTINE_KEY, JSON.stringify(routine)); } catch {}
+    try { localStorage.setItem(ROUTINE_KEY, JSON.stringify(routine)); } catch { /* ignore */ }
     window.dispatchEvent(new Event('pos:routine-changed'));
   }, [routine]);
 
   useEffect(() => {
-    try { localStorage.setItem(WORKOUT_LOG_KEY, JSON.stringify(log)); } catch {}
+    try { localStorage.setItem(WORKOUT_LOG_KEY, JSON.stringify(log)); } catch { /* ignore */ }
     window.dispatchEvent(new Event('pos:log-changed'));
   }, [log]);
 
@@ -110,8 +110,11 @@ export function useWorkoutToday() {
     };
   }, []);
 
-  const routine = useMemo(loadRoutine, [tick]);
-  const log     = useMemo(loadLog, [tick]);
+  // `tick` intentionally invalidates these on storage / pos:*-changed events.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const routine = useMemo(() => loadRoutine(), [tick]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const log     = useMemo(() => loadLog(), [tick]);
   const di = dayIndex();
   const idx = ((di % routine.workouts.length) + routine.workouts.length) % routine.workouts.length;
   const workout = routine.workouts[idx];
@@ -167,6 +170,9 @@ export function useMergedCalendarEvents(baseEvents: CalendarEvent[]): CalendarEv
     const wk = workoutsToEvents(routine, wStart);
     const filteredBase = baseEvents.filter(e => !/^(gym|5k long run)$/i.test(e.title));
     return [...filteredBase, ...wk];
+    // `tick` is intentional: it forces a recompute when the routine changes
+    // (bumped by the storage / pos:routine-changed listeners above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseEvents, tick]);
 }
 

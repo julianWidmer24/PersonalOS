@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { DashProvider } from './context/DashboardContext';
 import { useAuth } from './hooks/useAuth';
@@ -6,14 +7,17 @@ import { BottomNav } from './components/BottomNav';
 import { TaskModal } from './components/modals/TaskModal';
 import { JournalModal } from './components/modals/JournalModal';
 import { LoginPage } from './pages/LoginPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { TasksPage } from './pages/TasksPage';
-import { ProjectsPage } from './pages/ProjectsPage';
-import { CalendarPage } from './pages/CalendarPage';
-import { MealsPage } from './pages/MealsPage';
-import { GoalsPage } from './pages/GoalsPage';
-import { BrainPage } from './pages/BrainPage';
-import { SettingsPage } from './pages/SettingsPage';
+
+// Route-level code splitting: each page ships as its own chunk, loaded on
+// demand, so the initial bundle only carries the shell + first route.
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const TasksPage     = lazy(() => import('./pages/TasksPage').then(m => ({ default: m.TasksPage })));
+const ProjectsPage  = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
+const CalendarPage  = lazy(() => import('./pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
+const MealsPage     = lazy(() => import('./pages/MealsPage').then(m => ({ default: m.MealsPage })));
+const GoalsPage     = lazy(() => import('./pages/GoalsPage').then(m => ({ default: m.GoalsPage })));
+const BrainPage     = lazy(() => import('./pages/BrainPage').then(m => ({ default: m.BrainPage })));
+const SettingsPage  = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
 
 function LoadingScreen() {
   return (
@@ -27,16 +31,18 @@ function Layout() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--t1)] pb-16 md:pb-0">
       <TopBar />
-      <Routes>
-        <Route path="/"         element={<DashboardPage />} />
-        <Route path="/tasks"    element={<TasksPage />}     />
-        <Route path="/projects" element={<ProjectsPage />}  />
-        <Route path="/brain"    element={<BrainPage />}     />
-        <Route path="/calendar" element={<CalendarPage />}  />
-        <Route path="/meals"    element={<MealsPage />}     />
-        <Route path="/goals"    element={<GoalsPage />}     />
-        <Route path="/settings" element={<SettingsPage />}  />
-      </Routes>
+      <Suspense fallback={<LoadingScreen />}>
+        <Routes>
+          <Route path="/"         element={<DashboardPage />} />
+          <Route path="/tasks"    element={<TasksPage />}     />
+          <Route path="/projects" element={<ProjectsPage />}  />
+          <Route path="/brain"    element={<BrainPage />}     />
+          <Route path="/calendar" element={<CalendarPage />}  />
+          <Route path="/meals"    element={<MealsPage />}     />
+          <Route path="/goals"    element={<GoalsPage />}     />
+          <Route path="/settings" element={<SettingsPage />}  />
+        </Routes>
+      </Suspense>
       <TaskModal />
       <JournalModal />
       <BottomNav />
