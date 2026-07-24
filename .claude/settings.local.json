@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx vite *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5174)",
+      "Bash(npx tsc *)",
+      "Bash(node -e ' *)",
+      "Bash(npm run *)",
+      "Bash(perl *)",
+      "Bash(supabase projects *)",
+      "Read(//Users/julianwidmer/.supabase/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(npm -v)",
+      "Bash(ls node_modules)"
+    ]
+  }
+}

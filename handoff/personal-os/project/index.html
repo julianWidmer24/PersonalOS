@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Personal OS — Mission Control</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap">
+<script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Geist', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+          mono: ['Geist Mono', 'ui-monospace', 'monospace'],
+          serif: ['Instrument Serif', 'serif'],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    --bg: #0a0a0b;
+    --bg-elev: #101012;
+    --bg-card: #131316;
+    --bg-card-hi: #18181c;
+    --line: #1f1f23;
+    --line-hi: #2a2a30;
+    --t1: #ececef;
+    --t2: #93939b;
+    --t3: #56565d;
+    --t4: #36363b;
+    --accent: #f4f4f5;
+    --accent-2: rgba(244,244,245,.08);
+    --green: #6ee7b7;
+    --amber: #f5c451;
+    --red: #f87171;
+    --blue: #93c5fd;
+    --purple: #c4b5fd;
+  }
+  html, body { background: var(--bg); color: var(--t1); font-family: 'Geist', system-ui, sans-serif; }
+  body { margin: 0; }
+  /* Subtle scrollbars inside dashboard cards */
+  .pos-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+  .pos-scroll::-webkit-scrollbar-thumb { background: var(--line-hi); border-radius: 3px; }
+  .pos-scroll::-webkit-scrollbar-track { background: transparent; }
+  /* Ambient pulse */
+  @keyframes ambientPulse {
+    0%, 100% { opacity: .55; transform: scale(1); }
+    50%      { opacity: 1;   transform: scale(1.4); }
+  }
+  .ambient-dot { animation: ambientPulse 2.4s ease-in-out infinite; }
+  /* Streak flame shimmer */
+  @keyframes flameShimmer {
+    0%, 100% { opacity: .9; }
+    50%      { opacity: 1; }
+  }
+  .flame { animation: flameShimmer 1.8s ease-in-out infinite; }
+  /* Hide native checkbox, custom drawn */
+  .h-check { appearance: none; -webkit-appearance: none; }
+  /* Drag-handle cursor */
+  [draggable="true"] { cursor: grab; }
+  [draggable="true"]:active { cursor: grabbing; }
+  /* Sparkline crispness */
+  svg { shape-rendering: geometricPrecision; }
+  /* Tabular nums everywhere helpful */
+  .tnum { font-variant-numeric: tabular-nums; }
+
+  /* Masonry layout — each widget flows into the shortest column, so widgets
+     grow vertically (longer not wider) and pack tightly without overlap. */
+  .pos-masonry {
+    column-count: 1;
+    column-gap: 1rem;
+  }
+  @media (min-width: 768px)  { .pos-masonry { column-count: 2; column-gap: 1rem; } }
+  @media (min-width: 1280px) { .pos-masonry { column-count: 3; column-gap: 1rem; } }
+  .pos-masonry-item {
+    break-inside: avoid;
+    -webkit-column-break-inside: avoid;
+    page-break-inside: avoid;
+    display: block;
+    margin-bottom: 1rem;
+  }
+</style>
+</head>
+<body style="font-family: &quot;Segoe UI&quot;">
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" rx="20" fill="#0a0a0b"/>
+    <rect x="30" y="30" width="40" height="40" rx="9" fill="#f4f4f5"/>
+    <text x="50" y="58" font-size="22" font-weight="700" text-anchor="middle" fill="#0a0a0b" font-family="system-ui">J</text>
+  </svg>
+</template>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="dashboard-state.jsx"></script>
+<script type="text/babel" src="dashboard-sections.jsx"></script>
+<script type="text/babel" src="dashboard-extras.jsx"></script>
+<script type="text/babel" src="dashboard-projects.jsx"></script>
+<script type="text/babel" src="dashboard-layouts.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>
