@@ -1,5 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import type { WorkoutRoutineData, WorkoutLog, CalendarEvent } from '../types';
+import { supabase } from '../lib/supabase';
+import { getUserId } from '../lib/authUser';
 
 const ROUTINE_KEY    = 'pos:routine:v2';
 const WORKOUT_LOG_KEY = 'pos:workout-log:v2';
@@ -74,15 +76,37 @@ function loadLog(): WorkoutLog {
   return { entries, streak: 2 };
 }
 
+// Consecutive confirmed days back from today.
+function computeStreak(entries: WorkoutLog['entries']): number {
+  let s = 0;
+  const d = new Date();
+  for (let i = 0; i < 400; i++) {
+    if (entries[todayKey(d)]?.confirmed) { s++; d.setDate(d.getDate() - 1); }
+    else break;
+  }
+  return s;
+}
+
+// Offline-first, same pattern as usePhysique: localStorage stays the synchronous
+// cache (so the sync readers below keep working), Supabase (migration 006 tables
+// `workout_routines` + `workout_log_days`) is the cross-device backing store.
+// If those tables aren't present the remote calls no-op and the app runs locally.
 export function usePhysical() {
   const [routine, setRoutineState] = useState<WorkoutRoutineData>(loadRoutine);
   const [log, setLogState]         = useState<WorkoutLog>(loadLog);
+
+  const routineIdRef  = useRef<string | null>(null);
+  const routineReady  = useRef(false);
+  const logReady      = useRef(false);
+  const syncedRoutine = useRef<WorkoutRoutineData>(routine);
+  const syncedLog     = useRef<WorkoutLog>(log);
 
   const setRoutine = (r: WorkoutRoutineData) => setRoutineState(r);
   const setLog     = (updater: WorkoutLog | ((prev: WorkoutLog) => WorkoutLog)) => {
     setLogState(updater);
   };
 
+  // Write-through to localStorage + notify the sync readers (unchanged).
   useEffect(() => {
     try { localStorage.setItem(ROUTINE_KEY, JSON.stringify(routine)); } catch { /* ignore */ }
     window.dispatchEvent(new Event('pos:routine-changed'));
@@ -91,6 +115,93 @@ export function usePhysical() {
   useEffect(() => {
     try { localStorage.setItem(WORKOUT_LOG_KEY, JSON.stringify(log)); } catch { /* ignore */ }
     window.dispatchEvent(new Event('pos:log-changed'));
+  }, [log]);
+
+  // Hydrate routine + log from Supabase once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const [rRes, lRes] = await Promise.all([
+        supabase.from('workout_routines').select('*').eq('is_active', true)
+          .order('imported_at', { ascending: false }).limit(1),
+        supabase.from('workout_log_days').select('*'),
+      ]);
+      if (cancelled) return;
+
+      if (!rRes.error && rRes.data) {
+        routineReady.current = true;
+        if (rRes.data.length) {
+          const row = rRes.data[0];
+          routineIdRef.current = row.id;
+          const rd: WorkoutRoutineData = {
+            workouts: row.workouts ?? [], raw: row.raw ?? '', importedAt: row.imported_at ?? '',
+          };
+          syncedRoutine.current = rd;
+          setRoutineState(rd);
+        }
+      }
+
+      if (!lRes.error && lRes.data) {
+        logReady.current = true;
+        if (lRes.data.length) {
+          const entries: WorkoutLog['entries'] = {};
+          for (const d of lRes.data) {
+            entries[String(d.log_date)] = { confirmed: !!d.confirmed, photo: d.photo ?? null, idx: d.idx ?? 0 };
+          }
+          const wl: WorkoutLog = { entries, streak: computeStreak(entries) };
+          syncedLog.current = wl;
+          setLogState(wl);
+        } else {
+          syncedLog.current = { entries: {}, streak: 0 };
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Push routine changes: single active row per user (update or insert).
+  useEffect(() => {
+    if (!routineReady.current || routine === syncedRoutine.current) return;
+    syncedRoutine.current = routine;
+    (async () => {
+      const uid = await getUserId();
+      if (!uid) return;
+      if (routineIdRef.current) {
+        await supabase.from('workout_routines')
+          .update({ raw: routine.raw, workouts: routine.workouts, imported_at: new Date().toISOString() })
+          .eq('id', routineIdRef.current);
+      } else {
+        await supabase.from('workout_routines').update({ is_active: false }).eq('user_id', uid).eq('is_active', true);
+        const { data, error } = await supabase.from('workout_routines')
+          .insert({ user_id: uid, raw: routine.raw, workouts: routine.workouts, is_active: true })
+          .select().single();
+        if (!error && data) routineIdRef.current = data.id;
+      }
+    })();
+  }, [routine]);
+
+  // Push log changes: upsert added/changed days, delete removed ones.
+  useEffect(() => {
+    if (!logReady.current || log === syncedLog.current) return;
+    const prev = syncedLog.current;
+    syncedLog.current = log;
+    (async () => {
+      const uid = await getUserId();
+      if (!uid) return;
+      const prevE = prev.entries, nextE = log.entries;
+      for (const k of Object.keys(nextE)) {
+        const n = nextE[k], p = prevE[k];
+        if (!p || p.confirmed !== n.confirmed || p.photo !== n.photo || p.idx !== n.idx) {
+          await supabase.from('workout_log_days').upsert(
+            { user_id: uid, log_date: k, confirmed: n.confirmed, photo: n.photo, idx: n.idx },
+            { onConflict: 'user_id,log_date' },
+          );
+        }
+      }
+      for (const k of Object.keys(prevE)) {
+        if (!nextE[k]) await supabase.from('workout_log_days').delete().eq('user_id', uid).eq('log_date', k);
+      }
+    })();
   }, [log]);
 
   return { routine, setRoutine, log, setLog };

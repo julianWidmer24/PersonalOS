@@ -128,6 +128,7 @@ export interface WorkoutRoutineData {
 }
 
 export interface PhysiqueEntry {
+  id?: string;
   week: number;
   label: string;
   date: string;
