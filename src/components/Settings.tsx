@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 import type { Habit } from '../types';
 import { Tabs } from './shared/Tabs';
 
@@ -169,11 +170,104 @@ function IntegrationRow({ name, description, icon, connected }: { name: string; 
   );
 }
 
+// Live Google Calendar connect/disconnect row (read-only calendar access).
+function GoogleCalendarRow() {
+  const [status, setStatus] = useState<{ connected: boolean; email: string | null } | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Read the ?google= result once, lazily (no setState in the effect body).
+  const [notice, setNotice] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('google'),
+  );
+
+  const loadStatus = () => {
+    supabase.functions.invoke('google-calendar', { body: { action: 'status' } }).then(({ data, error }) => {
+      if (error || !data || data.error) { setStatus({ connected: false, email: null }); return; }
+      setStatus({ connected: !!data.connected, email: data.email ?? null });
+    });
+  };
+
+  useEffect(() => {
+    // Clean the query param so a refresh doesn't re-show the banner.
+    if (notice) window.history.replaceState({}, '', window.location.pathname);
+    loadStatus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const connect = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke('google-oauth-start', { body: {} });
+    if (error || !data?.url) {
+      setBusy(false);
+      setNotice('start_failed');
+      return;
+    }
+    window.location.href = data.url; // Google consent → callback → back to /settings
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    await supabase.functions.invoke('google-calendar', { body: { action: 'disconnect' } });
+    setBusy(false);
+    loadStatus();
+  };
+
+  const connected = status?.connected;
+  const desc = connected
+    ? `Connected${status?.email ? ` · ${status.email}` : ''} · read-only`
+    : 'Show your Google Calendar events on the dashboard (read-only)';
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between p-4 rounded-xl border border-[var(--line)] bg-[var(--bg-elev)]/30">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-xl bg-[var(--bg-card)] border border-[var(--line)] grid place-items-center text-[16px]">📅</div>
+          <div className="min-w-0">
+            <div className="text-[12.5px] font-medium text-[var(--t1)]">Google Calendar</div>
+            <div className="text-[11px] text-[var(--t3)] truncate">{desc}</div>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {status == null ? (
+            <span className="text-[10.5px] text-[var(--t4)]">…</span>
+          ) : connected ? (
+            <>
+              <span className="text-[10.5px] text-[var(--green)] px-2 py-0.5 rounded-full bg-[var(--green)]/10">Connected</span>
+              <button
+                onClick={disconnect}
+                disabled={busy}
+                className="px-3 py-1.5 rounded-lg border border-[var(--line)] text-[11.5px] text-[var(--t2)] hover:text-[var(--t1)] hover:border-[var(--line-hi)] transition-colors disabled:opacity-40"
+              >
+                Disconnect
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={connect}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-[var(--bg)] text-[11.5px] font-medium hover:opacity-90 transition-opacity disabled:opacity-40"
+            >
+              {busy ? 'Redirecting…' : 'Connect'}
+            </button>
+          )}
+        </div>
+      </div>
+      {notice === 'connected' && (
+        <div className="text-[11px] text-[var(--green)] px-1">✓ Google Calendar connected.</div>
+      )}
+      {(notice === 'error' || notice === 'start_failed') && (
+        <div className="text-[11px] text-[var(--red)] px-1">
+          Couldn't connect. Make sure the edge functions are deployed and Google OAuth is configured.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function IntegrationsSettings() {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-[13px] font-medium text-[var(--t1)]">Connected accounts</div>
-      <IntegrationRow name="Google Calendar" description="Sync calendar events to your dashboard" icon="📅" />
+      <GoogleCalendarRow />
       <IntegrationRow name="Google Sheets" description="Pull finance data from your spreadsheet" icon="📊" />
       <IntegrationRow name="Telegram Bot" description="Voice input pipeline via Telegram" icon="✈️" />
       <IntegrationRow name="Claude AI" description="AI classification, summaries, and queries" icon="◈" />

@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { SEED_DATA } from '../data/seed';
 import { useMergedCalendarEvents } from '../hooks/usePhysical';
+import { useGoogleCalendar } from '../hooks/useGoogleCalendar';
 import type { CalendarEvent } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
@@ -175,7 +176,12 @@ function CalendarMonth({ events }: { events: CalendarEvent[] }) {
 
 export function Calendar() {
   const [view, setView] = useState('Week');
-  const events = useMergedCalendarEvents(SEED_DATA.events);
+  const { connected, events: googleEvents, loading } = useGoogleCalendar();
+  const baseEvents = useMemo(
+    () => [...SEED_DATA.events, ...googleEvents],
+    [googleEvents],
+  );
+  const events = useMergedCalendarEvents(baseEvents);
 
   const dates = weekDates();
   const shortDate = (d: Date) => d.toLocaleDateString([], { month: 'short', day: 'numeric' });
@@ -183,11 +189,29 @@ export function Calendar() {
     ? new Date().toLocaleDateString([], { month: 'long', year: 'numeric' })
     : `${shortDate(dates[0])} — ${shortDate(dates[6])}`;
 
+  const gcalBadge = loading ? null : connected ? (
+    <span
+      className="flex items-center gap-1 text-[10px] text-[var(--green)] px-1.5 py-0.5 rounded-full bg-[var(--green)]/10"
+      title="Google Calendar connected"
+    >
+      <span className="w-1.5 h-1.5 rounded-full bg-[var(--green)]" /> GCal
+    </span>
+  ) : (
+    <a href="/settings" className="text-[10px] text-[var(--t3)] hover:text-[var(--t1)] transition-colors" title="Connect Google Calendar">
+      + Google Calendar
+    </a>
+  );
+
   return (
     <Card
       title="Calendar"
       kicker={kicker}
-      action={<Tabs tabs={['Day', 'Week', 'Month']} value={view} onChange={setView} />}
+      action={
+        <div className="flex items-center gap-2">
+          {gcalBadge}
+          <Tabs tabs={['Day', 'Week', 'Month']} value={view} onChange={setView} />
+        </div>
+      }
     >
       <div>
         {view === 'Day'   && <CalendarDay events={events} />}
