@@ -27,6 +27,23 @@ function StarBtn({ starred, onStar }: { starred: boolean; onStar: () => void }) 
   );
 }
 
+function DeleteBtn({ onDelete }: { onDelete: () => void }) {
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onDelete(); }}
+      title="Delete task"
+      className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-[var(--t3)] hover:text-[var(--red,#ef4444)] hover:scale-110"
+    >
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+        <path
+          d="M2.5 3h7M5 3V2.2a.7.7 0 0 1 .7-.7h.6a.7.7 0 0 1 .7.7V3M4 3l.4 6.3a.7.7 0 0 0 .7.65h1.8a.7.7 0 0 0 .7-.65L8 3"
+          stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
 const TASK_COLUMNS = [
   { id: 'now',   label: 'Now',   hint: 'in focus'  },
   { id: 'next',  label: 'Next',  hint: 'this week' },
@@ -38,6 +55,7 @@ interface TaskRowProps {
   t: Task;
   onToggle: (id: string) => void;
   onStar?: (id: string) => void;
+  onDelete?: (id: string) => void;
   onDragStart?: (id: string) => void;
   onDragOver?: (id: string) => void;
   onDrop?: (id: string) => void;
@@ -45,7 +63,7 @@ interface TaskRowProps {
   project?: Project | null;
 }
 
-function TaskRow({ t, onToggle, onStar, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
+function TaskRow({ t, onToggle, onStar, onDelete, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
   const tagColor = TAG_COLORS[t.tag] || {};
   const isDone = t.status === 'done';
   return (
@@ -87,9 +105,10 @@ function TaskRow({ t, onToggle, onStar, onDragStart, onDragOver, onDrop, compact
           </div>
         )}
       </div>
-      {onStar && (
-        <div className="mt-0.5">
-          <StarBtn starred={!!t.isStarred} onStar={() => onStar(t.id)} />
+      {(onStar || onDelete) && (
+        <div className="mt-0.5 flex items-center gap-2">
+          {onStar && <StarBtn starred={!!t.isStarred} onStar={() => onStar(t.id)} />}
+          {onDelete && <DeleteBtn onDelete={() => onDelete(t.id)} />}
         </div>
       )}
     </li>
@@ -97,7 +116,7 @@ function TaskRow({ t, onToggle, onStar, onDragStart, onDragOver, onDrop, compact
 }
 
 export function TaskCRM() {
-  const { tasks, projects, toggleTask, starTask, reorderTasks, setModal } = useDashboard();
+  const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, setModal } = useDashboard();
   const [dragId, setDragId] = useState<string | null>(null);
   const [view, setView] = useState('Pipeline');
 
@@ -167,7 +186,7 @@ export function TaskCRM() {
                             key={t.id}
                             draggable
                             onDragStart={() => onDragStart(t.id)}
-                            className="p-2 rounded-md bg-[var(--bg-card)] border border-[var(--line)] hover:border-[var(--line-hi)] transition-colors"
+                            className="group p-2 rounded-md bg-[var(--bg-card)] border border-[var(--line)] hover:border-[var(--line-hi)] transition-colors"
                           >
                             <div className="flex items-start gap-2">
                               <button
@@ -195,7 +214,10 @@ export function TaskCRM() {
                                     </span>
                                   )}
                                   <span className="text-[10px] text-[var(--t3)] truncate">{t.due}</span>
-                                  <StarBtn starred={!!t.isStarred} onStar={() => starTask(t.id)} />
+                                  <span className="ml-auto flex items-center gap-2">
+                                    <StarBtn starred={!!t.isStarred} onStar={() => starTask(t.id)} />
+                                    <DeleteBtn onDelete={() => removeTask(t.id)} />
+                                  </span>
                                 </div>
                               </div>
                             </div>
@@ -213,7 +235,7 @@ export function TaskCRM() {
         <ul className="space-y-0">
           {tasks.map(t => (
             <TaskRow
-              key={t.id} t={t} onToggle={toggleTask} onStar={starTask}
+              key={t.id} t={t} onToggle={toggleTask} onStar={starTask} onDelete={removeTask}
               project={t.projectId ? projById[t.projectId] : null}
               onDragStart={onDragStart} onDrop={onDrop} onDragOver={() => {}}
               compact={false}

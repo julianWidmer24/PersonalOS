@@ -49,7 +49,9 @@ const STATUS_FROM_DB: Record<string, Task['status']> = {
   today:      'now',
   this_week:  'next',
   this_month: 'later',
-  backlog:    'later',
+  // 'done' is persisted as the DB's 'backlog' bucket (the schema has no
+  // dedicated done state), so map it back to 'done' — not 'later' — on reload.
+  backlog:    'done',
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
