@@ -1,7 +1,17 @@
 import { useState } from 'react';
 import { useDashboard } from '../context/DashboardContext';
+import { supabase } from '../lib/supabase';
 import { TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
 import type { LifeArea, Task } from '../types';
+
+// classify returns { ok, result }. For the plain-text advisor prompts the
+// result is usually { text: "…" }, but tolerate a raw string too.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resultText(result: any): string {
+  if (typeof result === 'string') return result;
+  if (result && typeof result.text === 'string') return result.text;
+  return JSON.stringify(result);
+}
 
 const LIFE_AREAS: LifeArea[] = [
   { id: 'academic',  name: 'Academic',       description: 'Coursework, research, and learning',        icon: '◈', color: '#93c5fd', taskTag: 'course'   },
@@ -65,9 +75,11 @@ function AreaPanel({ area }: { area: LifeArea }) {
     setLoading(true);
     setAiResponse(null);
     try {
-      // TODO: Call Supabase Edge Function /functions/v1/classify with:
-      // { type: 'area_summary', area: area.name, tasks: areaTasks, query }
-      throw new Error('Claude integration not configured — connect a backend edge function to enable AI summaries.');
+      const { data, error } = await supabase.functions.invoke('classify', {
+        body: { type: 'area_summary', area: area.name, tasks: areaTasks, query },
+      });
+      if (error || !data?.ok) throw new Error(error?.message ?? data?.error ?? 'Request failed');
+      setAiResponse(resultText(data.result));
     } catch (e) {
       setAiResponse('⚠ ' + (e as Error).message);
     } finally {
@@ -145,10 +157,11 @@ function StrategicQuery() {
     setLoading(true);
     setResponse(null);
     try {
-      // TODO: Call Supabase Edge Function /functions/v1/classify with:
-      // { type: 'strategic_query', query, tasks, goals, recentJournal: journal.slice(0, 5) }
-      void tasks; void goals; void journal;
-      throw new Error('Claude integration not configured — connect a Supabase Edge Function to enable strategic queries.');
+      const { data, error } = await supabase.functions.invoke('classify', {
+        body: { type: 'strategic_query', query, tasks, goals, recentJournal: journal.slice(0, 5) },
+      });
+      if (error || !data?.ok) throw new Error(error?.message ?? data?.error ?? 'Request failed');
+      setResponse(resultText(data.result));
     } catch (e) {
       setResponse('⚠ ' + (e as Error).message);
     } finally {
