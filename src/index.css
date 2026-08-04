@@ -95,27 +95,153 @@ svg {
   font-variant-numeric: tabular-nums;
 }
 
-/* Masonry layout */
-.pos-masonry {
-  column-count: 1;
-  column-gap: 1rem;
+/* Calendar event blocks */
+.pos-event {
+  transition:
+    filter 0.12s ease,
+    box-shadow 0.12s ease;
+  cursor: pointer;
+}
+.pos-event:hover {
+  filter: brightness(1.45);
+}
+.pos-event:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+.pos-event-selected {
+  box-shadow: 0 0 0 1px var(--accent) !important;
+  filter: brightness(1.35);
+}
+
+/* Resizable widget grid — 8px row rhythm gives a masonry-tight pack while
+   still allowing whole-column width spans. Geometry mirrored in WidgetGrid.tsx. */
+.pos-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 1rem;
+  grid-auto-rows: 8px;
+  grid-auto-flow: row dense;
+  align-items: start;
 }
 @media (min-width: 768px) {
-  .pos-masonry {
-    column-count: 2;
-    column-gap: 1rem;
+  .pos-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 @media (min-width: 1280px) {
-  .pos-masonry {
-    column-count: 3;
-    column-gap: 1rem;
+  .pos-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
-.pos-masonry-item {
-  break-inside: avoid;
-  -webkit-column-break-inside: avoid;
-  page-break-inside: avoid;
-  display: block;
-  margin-bottom: 1rem;
+
+.pos-widget {
+  min-width: 0;
+}
+.pos-widget-dragging {
+  border-radius: 12px;
+  outline: 1px solid var(--line-hi);
+}
+
+/* Reorder grip — sits just outside the card's left edge, like a block handle */
+.pos-drag-handle {
+  position: absolute;
+  left: -7px;
+  top: 14px;
+  z-index: 25;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-elev);
+  color: var(--t4);
+  cursor: grab;
+  opacity: 0;
+  touch-action: none;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.pos-widget:hover .pos-drag-handle,
+.pos-drag-handle:focus-visible {
+  opacity: 1;
+}
+.pos-drag-handle:hover,
+.pos-drag-handle:focus-visible {
+  color: var(--t2);
+  border-color: var(--line-hi);
+}
+.pos-drag-handle:active {
+  cursor: grabbing;
+}
+@media (max-width: 767px) {
+  .pos-drag-handle {
+    display: none;
+  }
+}
+
+/* The tile being dragged fades; its landing slot is outlined */
+.pos-widget-ghost {
+  opacity: 0.35;
+}
+.pos-drop-outline {
+  position: absolute;
+  z-index: 4;
+  border: 1px dashed var(--line-hi);
+  border-radius: 12px;
+  background: var(--accent-2);
+  pointer-events: none;
+  transition:
+    left 0.13s ease,
+    top 0.13s ease,
+    width 0.13s ease,
+    height 0.13s ease;
+}
+.pos-drag-chip {
+  position: fixed;
+  z-index: 300;
+  padding: 3px 8px;
+  border: 1px solid var(--line-hi);
+  border-radius: 6px;
+  background: var(--bg-elev);
+  color: var(--t1);
+  font-size: 11px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+  pointer-events: none;
+}
+
+.pos-resize-handle {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--t4);
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+  transition:
+    opacity 0.15s ease,
+    color 0.15s ease;
+}
+.pos-widget:hover .pos-resize-handle,
+.pos-resize-handle:focus-visible {
+  opacity: 1;
+}
+.pos-resize-handle:hover,
+.pos-resize-handle:focus-visible {
+  color: var(--t2);
+  background: var(--bg-card-hi);
+}
+@media (max-width: 767px) {
+  .pos-resize-handle {
+    display: none;
+  }
 }

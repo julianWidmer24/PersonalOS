@@ -11,6 +11,7 @@ import { MealPlan } from '../components/MealPlan';
 import { Health } from '../components/Health';
 import { Finance } from '../components/Finance';
 import { Journal } from '../components/Journal';
+import { WidgetGrid, Widget } from '../components/shared/WidgetGrid';
 
 export function DashboardPage() {
   return (
@@ -23,22 +24,23 @@ export function DashboardPage() {
         <KPIStripResponsive />
       </section>
 
-      <div className="pos-masonry">
-        <div className="pos-masonry-item"><KeyTasks /></div>
-        <div className="pos-masonry-item"><Projects /></div>
-        <div className="pos-masonry-item"><TaskCRM /></div>
-        <div className="pos-masonry-item"><Calendar /></div>
-        <div className="pos-masonry-item"><Habits /></div>
-        <div className="pos-masonry-item"><Goals /></div>
-        <div className="pos-masonry-item"><PhysicalActivity /></div>
-        <div className="pos-masonry-item"><MealPlan /></div>
-        <div className="pos-masonry-item"><Health /></div>
-        <div className="pos-masonry-item"><Finance /></div>
-        <div className="pos-masonry-item"><Journal /></div>
-      </div>
+      <WidgetGrid>
+        <Widget key="key-tasks" id="key-tasks"><KeyTasks /></Widget>
+        <Widget key="projects" id="projects"><Projects /></Widget>
+        <Widget key="task-crm" id="task-crm"><TaskCRM /></Widget>
+        <Widget key="calendar" id="calendar"><Calendar /></Widget>
+        <Widget key="habits" id="habits"><Habits /></Widget>
+        <Widget key="goals" id="goals"><Goals /></Widget>
+        <Widget key="physical" id="physical"><PhysicalActivity /></Widget>
+        <Widget key="meal-plan" id="meal-plan"><MealPlan /></Widget>
+        <Widget key="health" id="health"><Health /></Widget>
+        <Widget key="finance" id="finance"><Finance /></Widget>
+        <Widget key="journal" id="journal"><Journal /></Widget>
+      </WidgetGrid>
 
       <footer className="mt-8 pb-4 text-center text-[10.5px] text-[var(--t4)] tnum">
         Personal OS · Mission Control
+        <span className="hidden md:inline"> · drag a card's bottom-right corner to resize</span>
       </footer>
     </main>
   );
