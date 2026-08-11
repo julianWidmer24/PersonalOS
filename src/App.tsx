@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DashProvider } from './context/DashboardContext';
+import { PhysicalProvider } from './context/PhysicalContext';
 import { useAuth } from './hooks/useAuth';
 import { TopBar } from './components/TopBar';
 import { BottomNav } from './components/BottomNav';
@@ -14,7 +15,7 @@ const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ de
 const TasksPage     = lazy(() => import('./pages/TasksPage').then(m => ({ default: m.TasksPage })));
 const ProjectsPage  = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
 const CalendarPage  = lazy(() => import('./pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
-const MealsPage     = lazy(() => import('./pages/MealsPage').then(m => ({ default: m.MealsPage })));
+const FitnessPage   = lazy(() => import('./pages/FitnessPage').then(m => ({ default: m.FitnessPage })));
 const GoalsPage     = lazy(() => import('./pages/GoalsPage').then(m => ({ default: m.GoalsPage })));
 const BrainPage     = lazy(() => import('./pages/BrainPage').then(m => ({ default: m.BrainPage })));
 const SettingsPage  = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -38,7 +39,9 @@ function Layout() {
           <Route path="/projects" element={<ProjectsPage />}  />
           <Route path="/brain"    element={<BrainPage />}     />
           <Route path="/calendar" element={<CalendarPage />}  />
-          <Route path="/meals"    element={<MealsPage />}     />
+          <Route path="/fitness"  element={<FitnessPage />}   />
+          {/* /meals kept so existing bookmarks still land somewhere */}
+          <Route path="/meals"    element={<Navigate to="/fitness" replace />} />
           <Route path="/goals"    element={<GoalsPage />}     />
           <Route path="/settings" element={<SettingsPage />}  />
         </Routes>
@@ -58,7 +61,9 @@ function AppInner() {
 
   return (
     <DashProvider>
-      <Layout />
+      <PhysicalProvider>
+        <Layout />
+      </PhysicalProvider>
     </DashProvider>
   );
 }

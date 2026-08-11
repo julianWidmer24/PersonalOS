@@ -8,7 +8,7 @@ const NAV_ITEMS = [
   { label: 'Projects', to: '/projects'  },
   { label: 'Brain',    to: '/brain'     },
   { label: 'Calendar', to: '/calendar'  },
-  { label: 'Meals',    to: '/meals'     },
+  { label: 'Fitness',  to: '/fitness'   },
   { label: 'Goals',    to: '/goals'     },
   { label: 'Settings', to: '/settings'  },
 ] as const;

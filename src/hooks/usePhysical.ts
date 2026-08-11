@@ -40,8 +40,13 @@ export const KIND_FROM_NAME = (name: string) => {
   return { fg: '#e5e5e5', bg: 'rgba(229,229,229,.10)', icon: '◆', label: 'lift' };
 };
 
+// Local-date key (YYYY-MM-DD). Deliberately not toISOString(): that converts to
+// UTC first, so an evening log west of UTC — or a pre-dawn one east of it —
+// lands on the neighbouring day's key.
 export function todayKey(d = new Date()) {
-  return d.toISOString().slice(0, 10);
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 export function dayIndex(d = new Date()) {
@@ -76,8 +81,27 @@ function loadLog(): WorkoutLog {
   return { entries, streak: 2 };
 }
 
+/**
+ * What workout a given day shows: the day's own override if it has one,
+ * otherwise the routine's suggestion for that slot in the cycle.
+ */
+export function resolveDay(routine: WorkoutRoutineData, log: WorkoutLog, d: Date) {
+  const entry = log.entries[todayKey(d)];
+  const total = routine.workouts.length;
+  const idx = total ? (((entry?.idx ?? dayIndex(d)) % total) + total) % total : -1;
+  const base = idx >= 0 ? routine.workouts[idx] : undefined;
+  const custom = entry?.name !== undefined || entry?.exercises !== undefined;
+  return {
+    entry,
+    idx,
+    custom,
+    name: entry?.name ?? base?.name ?? 'Rest',
+    exercises: entry?.exercises ?? base?.exercises ?? [],
+  };
+}
+
 // Consecutive confirmed days back from today.
-function computeStreak(entries: WorkoutLog['entries']): number {
+export function computeStreak(entries: WorkoutLog['entries']): number {
   let s = 0;
   const d = new Date();
   for (let i = 0; i < 400; i++) {
@@ -146,7 +170,13 @@ export function usePhysical() {
         if (lRes.data.length) {
           const entries: WorkoutLog['entries'] = {};
           for (const d of lRes.data) {
-            entries[String(d.log_date)] = { confirmed: !!d.confirmed, photo: d.photo ?? null, idx: d.idx ?? 0 };
+            const e: WorkoutLog['entries'][string] = {
+              confirmed: !!d.confirmed, photo: d.photo ?? null, idx: d.idx ?? 0,
+            };
+            // null/absent → no override (migration 009 may not be applied)
+            if (d.name != null) e.name = d.name;
+            if (Array.isArray(d.exercises)) e.exercises = d.exercises;
+            entries[String(d.log_date)] = e;
           }
           const wl: WorkoutLog = { entries, streak: computeStreak(entries) };
           syncedLog.current = wl;
@@ -189,13 +219,24 @@ export function usePhysical() {
       const uid = await getUserId();
       if (!uid) return;
       const prevE = prev.entries, nextE = log.entries;
+      const sameList = (a?: string[], b?: string[]) =>
+        a === b || (!!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]));
       for (const k of Object.keys(nextE)) {
         const n = nextE[k], p = prevE[k];
-        if (!p || p.confirmed !== n.confirmed || p.photo !== n.photo || p.idx !== n.idx) {
-          await supabase.from('workout_log_days').upsert(
-            { user_id: uid, log_date: k, confirmed: n.confirmed, photo: n.photo, idx: n.idx },
-            { onConflict: 'user_id,log_date' },
-          );
+        if (!p || p.confirmed !== n.confirmed || p.photo !== n.photo || p.idx !== n.idx
+            || p.name !== n.name || !sameList(p.exercises, n.exercises)) {
+          const row: Record<string, unknown> = {
+            user_id: uid, log_date: k, confirmed: n.confirmed, photo: n.photo, idx: n.idx,
+            name: n.name ?? null, exercises: n.exercises ?? null,
+          };
+          const { error } = await supabase.from('workout_log_days')
+            .upsert(row, { onConflict: 'user_id,log_date' });
+          if (error) {
+            // Most likely migration 009 isn't applied — persist the rest of the
+            // day rather than losing the completion along with the override.
+            delete row.name; delete row.exercises;
+            await supabase.from('workout_log_days').upsert(row, { onConflict: 'user_id,log_date' });
+          }
         }
       }
       for (const k of Object.keys(prevE)) {
@@ -226,12 +267,14 @@ export function useWorkoutToday() {
   const routine = useMemo(() => loadRoutine(), [tick]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const log     = useMemo(() => loadLog(), [tick]);
-  const di = dayIndex();
-  const idx = ((di % routine.workouts.length) + routine.workouts.length) % routine.workouts.length;
-  const workout = routine.workouts[idx];
-  const doneToday = !!log.entries[todayKey()]?.confirmed;
+  // resolveDay so a per-day edit shows up here too, not just on the card.
+  const r = resolveDay(routine, log, new Date());
+  const workout = r.idx >= 0 || r.custom
+    ? { id: 'today', name: r.name, exercises: r.exercises }
+    : undefined;
+  const doneToday = !!r.entry?.confirmed;
   const streak = log.streak || 0;
-  return { workout, idx, doneToday, streak, total: routine.workouts.length, kind: KIND_FROM_NAME(workout?.name || '') };
+  return { workout, idx: r.idx, doneToday, streak, total: routine.workouts.length, kind: KIND_FROM_NAME(r.name) };
 }
 
 export function workoutsToEvents(routine: WorkoutRoutineData, weekStartDi: number): CalendarEvent[] {

@@ -54,6 +54,38 @@ const STATUS_FROM_DB: Record<string, Task['status']> = {
   backlog:    'done',
 };
 
+// ── Done-task expiry ──────────────────────────────────────────
+// A task marked done is hard-deleted 3 weeks later. `completed_at` (migration
+// 008) is the clock; rows without one are left alone.
+const DONE_TTL_MS = 21 * 24 * 60 * 60 * 1000;
+const DONE_DB_STATUS = STATUS_TO_DB.done;
+
+const isExpiredDone = (row: { status?: string; completed_at?: string | null }) =>
+  row.status === DONE_DB_STATUS &&
+  !!row.completed_at &&
+  Date.now() - new Date(row.completed_at).getTime() > DONE_TTL_MS;
+
+async function purgeExpiredDoneTasks() {
+  const cutoff = new Date(Date.now() - DONE_TTL_MS).toISOString();
+  const { error } = await supabase.from('tasks').delete()
+    .eq('status', DONE_DB_STATUS)
+    .lt('completed_at', cutoff);
+  // Most likely cause of failure: migration 008 hasn't been applied yet.
+  if (error) console.error('purge expired done tasks error:', error);
+}
+
+// The live DB may predate migration 008 — retry without completed_at so a
+// status change still persists on a database that lacks the column.
+async function patchTaskRow(id: string, patch: Record<string, unknown>) {
+  let { error } = await supabase.from('tasks').update(patch).eq('id', id);
+  if (error && 'completed_at' in patch) {
+    const fallback = { ...patch };
+    delete fallback.completed_at;
+    ({ error } = await supabase.from('tasks').update(fallback).eq('id', id));
+  }
+  return error;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToTask(row: any): Task {
   return {
@@ -229,16 +261,23 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       userIdRef.current = data.session?.user?.id ?? null;
     });
 
-    supabase
-      .from('tasks')
-      .select('*')
-      .eq('archived', false)
-      .in('status', ['today', 'this_week', 'this_month', 'backlog'])
-      .order('created_at', { ascending: false })
-      .then(({ data, error }) => {
-        if (error) { console.error('tasks fetch error:', error); return; }
-        setTasks((data ?? []).map(rowToTask));
-      });
+    // Purge first so expired done tasks never make it into the fetch; the
+    // local filter is a backstop for when the delete fails (e.g. no migration).
+    const loadTasks = async () => {
+      await purgeExpiredDoneTasks();
+      const { data, error } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('archived', false)
+        .in('status', ['today', 'this_week', 'this_month', 'backlog'])
+        .order('created_at', { ascending: false });
+      if (error) { console.error('tasks fetch error:', error); return; }
+      setTasks((data ?? []).filter(row => !isExpiredDone(row)).map(rowToTask));
+    };
+    loadTasks();
+
+    // Re-run periodically so a long-lived session still ages tasks out.
+    const purgeTimer = setInterval(loadTasks, 6 * 60 * 60 * 1000);
 
     const channel = supabase
       .channel('tasks-changes')
@@ -264,7 +303,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { clearInterval(purgeTimer); supabase.removeChannel(channel); };
   }, []);
 
   // ── Load habits + habit_completions + realtime ────────────
@@ -419,9 +458,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     setTasks(ts => ts.map(t => {
       if (t.id !== id) return t;
       const newStatus = t.status === 'done' ? 'now' : 'done';
-      supabase.from('tasks').update({ status: STATUS_TO_DB[newStatus] ?? newStatus }).eq('id', id).then(({ error }) => {
-        if (error) console.error('toggleTask error:', error);
-      });
+      // Stamp/clear the expiry clock alongside the status change.
+      patchTaskRow(id, {
+        status: STATUS_TO_DB[newStatus] ?? newStatus,
+        completed_at: newStatus === 'done' ? new Date().toISOString() : null,
+      }).then(error => { if (error) console.error('toggleTask error:', error); });
       return { ...t, status: newStatus };
     }));
   }, []);
@@ -480,14 +521,15 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     if (patch.title     !== undefined) dbPatch.title    = patch.title;
     if (patch.tag       !== undefined) dbPatch.category = tagToCategory(patch.tag);
     if (patch.priority  !== undefined) dbPatch.priority = priorityToScore(patch.priority);
-    if (patch.status    !== undefined) dbPatch.status   = STATUS_TO_DB[patch.status] ?? patch.status;
+    if (patch.status    !== undefined) {
+      dbPatch.status = STATUS_TO_DB[patch.status] ?? patch.status;
+      dbPatch.completed_at = patch.status === 'done' ? new Date().toISOString() : null;
+    }
     if (patch.isStarred !== undefined) dbPatch.starred  = patch.isStarred;
     if (patch.projectId !== undefined) dbPatch.project_id = patch.projectId;
     if (Object.keys(dbPatch).length) {
-      supabase.from('tasks').update({ ...dbPatch, updated_at: new Date().toISOString() })
-        .eq('id', id).then(({ error }) => {
-          if (error) console.error('updateTask error:', error);
-        });
+      patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
+        .then(error => { if (error) console.error('updateTask error:', error); });
     }
   }, []);
 

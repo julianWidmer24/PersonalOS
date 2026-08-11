@@ -24,12 +24,49 @@ calls silently no-op; after you run it, the same actions sync to Supabase.
 After running, test (open DevTools → Network to watch the calls):
 1. Import a workout routine → check `workout_routines` has one `is_active` row.
 2. Mark today's workout done, reload → still done; `workout_log_days` has the row.
-3. Undo it → the row is deleted.
+3. Undo it → the row is deleted (or, if the day has a photo or a per-day edit,
+   kept with `confirmed = false` so that work isn't thrown away).
 4. Log a Check-in photo → a row appears in `physique_entries`.
 5. Open the app in a second browser/device → your routine, log, and photos load.
 
 If anything errors, check the Supabase logs and RLS policies (the script sets
 owner-only policies; a zero-policy table silently blocks all access).
+
+## 3. `008_task_completed_at.sql` — apply to turn on done-task expiry ✅
+Adds `tasks.completed_at`, backfills existing done rows to `now()`, and indexes it.
+
+The frontend deletes done tasks 3 weeks after `completed_at`. Rows with a NULL
+`completed_at` are never deleted, which is why the backfill matters: without it
+your existing done tasks would sit there forever. With it, they all start a
+fresh 3-week clock from the moment you run the script.
+
+Marking a task done still persists if you *don't* run this — the update retries
+without the column — but nothing will ever expire.
+
+⚠️ This app stores "done" as the DB's `backlog` status. Anything parked in
+`backlog` that you think of as "not done, just later" will also be deleted after
+3 weeks. Move those out before running.
+
+After running, test:
+1. Mark a task done → `tasks.completed_at` is set on that row.
+2. Un-check it → `completed_at` goes back to NULL.
+3. Hand-set a done task's `completed_at` to 30 days ago, reload the app → the
+   task is gone from the list and the row is deleted.
+
+## 4. `009_workout_day_overrides.sql` — apply for per-day workout edits ✅
+Adds `name` + `exercises` to `workout_log_days` so a single day can deviate from
+the routine without rewriting it.
+
+Same offline-first fallback as 006: before you run it, the upsert retries without
+those columns, so completions and photos still sync and per-day edits just stay
+in that browser's localStorage. After you run it, edits sync across devices.
+
+After running, test:
+1. Edit today's workout on the Fitness page → `workout_log_days` has the row with
+   `name` set.
+2. Edit a *future* day in the calendar → a row appears with `confirmed = false`.
+3. Hit "Use routine" on that day → the override clears (row deleted if the day
+   had no photo and wasn't confirmed).
 
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to

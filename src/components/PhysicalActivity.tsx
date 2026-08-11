@@ -1,10 +1,12 @@
 import { useState, useRef } from 'react';
-import { usePhysical, KIND_FROM_NAME, dayIndex, todayKey, parseRoutine, SEED_ROUTINE_TEXT } from '../hooks/usePhysical';
+import { KIND_FROM_NAME, todayKey, parseRoutine, resolveDay, computeStreak, SEED_ROUTINE_TEXT } from '../hooks/usePhysical';
+import { usePhysicalData } from '../context/PhysicalContext';
 import { usePhysique } from '../hooks/usePhysique';
 import type { PhysiqueEntry } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
 import { IconBtn } from './shared/IconBtn';
+import { WorkoutDayEditor } from './WorkoutDayEditor';
 
 // ── Routine importer ──────────────────────────────────────────
 interface RoutineImporterProps {
@@ -98,36 +100,85 @@ function PhotoTile({ entry, size = 'sm' }: { entry: PhysiqueEntry; size?: 'sm' |
 
 // ── Main component ────────────────────────────────────────────
 export function PhysicalActivity() {
-  const { routine, setRoutine, log, setLog } = usePhysical();
+  const { routine, setRoutine, log, setLog } = usePhysicalData();
   const [tab, setTab] = useState('Workout');
   const [importing, setImporting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [entries, setEntries] = usePhysique();
   const [thisWeek, setThisWeek] = useState<PhysiqueEntry | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const workoutPhotoRef = useRef<HTMLInputElement>(null);
 
-  const di = dayIndex();
-  const idx = ((di % routine.workouts.length) + routine.workouts.length) % routine.workouts.length;
-  const today = routine.workouts[idx];
-  const todayK = todayKey();
+  const now = new Date();
+  const idx = resolveDay(routine, log, now).idx;
+  const todayK = todayKey(now);
   const todayEntry = log.entries[todayK];
   const isDone = !!todayEntry?.confirmed;
 
-  const kind = today ? KIND_FROM_NAME(today.name) : KIND_FROM_NAME('');
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    return { d, key: todayKey(d), entry: log.entries[todayKey(d)] };
+  });
+
+  // A past day may be selected for viewing only — today stays the editable one.
+  const viewing = selectedKey && selectedKey !== todayK
+    ? days.find(d => d.key === selectedKey) ?? null
+    : null;
+  const view = resolveDay(routine, log, viewing ? viewing.d : now);
+  const viewEntry = view.entry;
+
+  const kind = KIND_FROM_NAME(view.name);
 
   const markDone = () => {
-    setLog(l => ({
-      entries: { ...l.entries, [todayK]: { confirmed: true, photo: l.entries[todayK]?.photo || null, idx } },
-      streak: (l.streak || 0) + (l.entries[todayK]?.confirmed ? 0 : 1),
-    }));
+    setLog(l => {
+      const entries = {
+        ...l.entries,
+        [todayK]: { ...(l.entries[todayK] ?? { photo: null, idx }), confirmed: true },
+      };
+      return { entries, streak: computeStreak(entries) };
+    });
   };
 
+  // Keep any photo or per-day edit — only the completion is being undone.
   const unmark = () => {
     setLog(l => {
-      const next = { ...l.entries };
-      delete next[todayK];
-      return { entries: next, streak: Math.max(0, (l.streak || 0) - 1) };
+      const cur = l.entries[todayK];
+      const entries = { ...l.entries };
+      const worthKeeping = cur && (cur.photo || cur.name !== undefined || cur.exercises !== undefined);
+      if (worthKeeping) entries[todayK] = { ...cur, confirmed: false };
+      else delete entries[todayK];
+      return { entries, streak: computeStreak(entries) };
     });
+  };
+
+  const saveDay = (name: string, exercises: string[]) => {
+    setLog(l => ({
+      ...l,
+      entries: {
+        ...l.entries,
+        [todayK]: { ...(l.entries[todayK] ?? { confirmed: false, photo: null, idx }), name, exercises },
+      },
+    }));
+    setEditing(false);
+  };
+
+  const resetDay = () => {
+    setLog(l => {
+      const cur = l.entries[todayK];
+      if (!cur) return l;
+      const entries = { ...l.entries };
+      if (cur.confirmed || cur.photo) {
+        const { name: _n, exercises: _e, ...rest } = cur;
+        void _n; void _e;
+        entries[todayK] = rest;
+      } else {
+        delete entries[todayK];
+      }
+      return { ...l, entries };
+    });
+    setEditing(false);
   };
 
   const onWorkoutPhoto = (file: File | undefined) => {
@@ -151,12 +202,6 @@ export function PhysicalActivity() {
     setRoutine({ workouts, raw, importedAt: 'Just now' });
     setImporting(false);
   };
-
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() - (6 - i));
-    return { d, key: todayKey(d), entry: log.entries[todayKey(d)] };
-  });
 
   const onPhysiqueFile = (file: File | undefined) => {
     if (!file) return;
@@ -211,55 +256,106 @@ export function PhysicalActivity() {
                   <span className="text-[18px] leading-none" style={{ color: kind.fg }}>{kind.icon}</span>
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--t3)]">
-                      Today · day {idx + 1} of {routine.workouts.length}
+                      {viewing
+                        ? viewing.d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+                        : 'Today'} · day {view.idx + 1} of {routine.workouts.length}
                     </div>
-                    <div className="text-[15px] font-medium text-[var(--t1)] leading-tight mt-0.5">
-                      {today?.name || 'Rest'}
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[15px] font-medium text-[var(--t1)] leading-tight">
+                        {view.name}
+                      </span>
+                      {view.custom && (
+                        <span className="px-1 py-0.5 rounded text-[9px] uppercase tracking-wider text-[var(--t3)] border border-[var(--line)]">
+                          edited
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
-                {isDone && (
+                {viewEntry?.confirmed ? (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ color: '#6ee7b7', background: 'rgba(110,231,183,.12)' }}>
                     ✓ done
                   </span>
-                )}
+                ) : viewing ? (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium text-[var(--t3)] bg-[var(--bg-card)] border border-[var(--line)]">
+                    missed
+                  </span>
+                ) : null}
               </div>
-              {today?.exercises?.length > 0 && (
+              {view.exercises.length > 0 && (
                 <ul className="flex flex-wrap gap-1 mt-2">
-                  {today.exercises.map((ex, i) => (
+                  {view.exercises.map((ex, i) => (
                     <li key={i} className="px-1.5 py-0.5 rounded text-[10.5px] text-[var(--t2)] bg-[var(--bg-card)] border border-[var(--line)]">{ex}</li>
                   ))}
                 </ul>
               )}
-              <div className="mt-3 flex items-center gap-1.5">
-                <button
-                  onClick={isDone ? unmark : markDone}
-                  className={`flex-1 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
-                    isDone
-                      ? 'border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]'
-                      : 'bg-[var(--accent)] text-[var(--bg)] hover:opacity-90'
-                  }`}
-                >
-                  {isDone ? 'Undo' : '✓ Mark done'}
-                </button>
-                <button
-                  onClick={() => workoutPhotoRef.current?.click()}
-                  className="px-2 py-1.5 rounded-md border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]"
-                  title="Add photo"
-                >
-                  {todayEntry?.photo ? (
-                    <img src={todayEntry.photo} alt="" className="w-4 h-4 rounded object-cover" />
-                  ) : (
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                      <rect x="3" y="6" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                      <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="1.6" />
-                      <path d="M8 6l1.5-2h5L16 6" stroke="currentColor" strokeWidth="1.6" />
-                    </svg>
+              {!viewing && editing && (
+                <div className="mt-2.5">
+                  <WorkoutDayEditor
+                    name={view.name}
+                    exercises={view.exercises}
+                    custom={view.custom}
+                    onSave={saveDay}
+                    onReset={resetDay}
+                    onClose={() => setEditing(false)}
+                  />
+                </div>
+              )}
+              {viewing ? (
+                <div className="mt-3 flex items-center gap-2">
+                  {viewing.entry?.photo && (
+                    <img src={viewing.entry.photo} alt="" className="w-10 h-10 rounded-md object-cover border border-[var(--line)]" />
                   )}
-                </button>
-                <input ref={workoutPhotoRef} type="file" accept="image/*" className="hidden"
-                  onChange={e => onWorkoutPhoto(e.target.files?.[0])} />
-              </div>
+                  <span className="text-[10.5px] text-[var(--t4)] flex-1">Past day · view only</span>
+                  <button
+                    onClick={() => setSelectedKey(null)}
+                    className="px-2 py-1 rounded-md text-[11px] border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]"
+                  >
+                    Back to today
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-3 flex items-center gap-1.5">
+                  <button
+                    onClick={isDone ? unmark : markDone}
+                    className={`flex-1 py-1.5 text-[12px] font-medium rounded-md transition-colors ${
+                      isDone
+                        ? 'border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]'
+                        : 'bg-[var(--accent)] text-[var(--bg)] hover:opacity-90'
+                    }`}
+                  >
+                    {isDone ? 'Undo' : '✓ Mark done'}
+                  </button>
+                  <button
+                    onClick={() => setEditing(v => !v)}
+                    className={`px-2 py-1.5 rounded-md border border-[var(--line-hi)] hover:text-[var(--t1)] ${
+                      editing ? 'text-[var(--t1)]' : 'text-[var(--t2)]'
+                    }`}
+                    title="Edit today's workout"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <path d="M4 20h4L19 9a2 2 0 00-3-3L5 17v3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => workoutPhotoRef.current?.click()}
+                    className="px-2 py-1.5 rounded-md border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]"
+                    title="Add photo"
+                  >
+                    {todayEntry?.photo ? (
+                      <img src={todayEntry.photo} alt="" className="w-4 h-4 rounded object-cover" />
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                        <rect x="3" y="6" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                        <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="1.6" />
+                        <path d="M8 6l1.5-2h5L16 6" stroke="currentColor" strokeWidth="1.6" />
+                      </svg>
+                    )}
+                  </button>
+                  <input ref={workoutPhotoRef} type="file" accept="image/*" className="hidden"
+                    onChange={e => onWorkoutPhoto(e.target.files?.[0])} />
+                </div>
+              )}
             </div>
 
             <div>
@@ -269,14 +365,18 @@ export function PhysicalActivity() {
               </div>
               <div className="flex gap-1">
                 {days.map((d, i) => {
-                  const w = routine.workouts[((d.entry?.idx ?? dayIndex(d.d)) % routine.workouts.length + routine.workouts.length) % routine.workouts.length];
-                  const k = KIND_FROM_NAME(w?.name || '');
+                  const dayView = resolveDay(routine, log, d.d);
+                  const k = KIND_FROM_NAME(dayView.name);
                   const done = !!d.entry?.confirmed;
                   const isToday = i === 6;
+                  const isSelected = viewing ? d.key === viewing.key : isToday;
                   return (
-                    <div
+                    <button
                       key={d.key}
-                      className={`flex-1 rounded-md p-1.5 border ${isToday ? 'border-[var(--accent)]' : 'border-[var(--line)]'} relative overflow-hidden`}
+                      type="button"
+                      onClick={() => setSelectedKey(isToday ? null : d.key)}
+                      title={`${d.d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })} · ${dayView.name}`}
+                      className={`flex-1 text-left rounded-md p-1.5 border ${isSelected ? 'border-[var(--accent)]' : 'border-[var(--line)] hover:border-[var(--line-hi)]'} relative overflow-hidden transition-colors`}
                       style={done ? { background: k.bg } : {}}
                     >
                       {d.entry?.photo && (
@@ -291,7 +391,7 @@ export function PhysicalActivity() {
                           {done ? '✓' : k.icon}
                         </div>
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>

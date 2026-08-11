@@ -108,6 +108,9 @@ export interface WorkoutEntry {
   confirmed: boolean;
   photo: string | null;
   idx: number;
+  /** Per-day overrides of the routine's suggestion. Absent → use the routine. */
+  name?: string;
+  exercises?: string[];
 }
 
 export interface WorkoutLog {
