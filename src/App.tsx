@@ -16,6 +16,7 @@ const TasksPage     = lazy(() => import('./pages/TasksPage').then(m => ({ defaul
 const ProjectsPage  = lazy(() => import('./pages/ProjectsPage').then(m => ({ default: m.ProjectsPage })));
 const CalendarPage  = lazy(() => import('./pages/CalendarPage').then(m => ({ default: m.CalendarPage })));
 const FitnessPage   = lazy(() => import('./pages/FitnessPage').then(m => ({ default: m.FitnessPage })));
+const AcademicsPage = lazy(() => import('./pages/AcademicsPage').then(m => ({ default: m.AcademicsPage })));
 const GoalsPage     = lazy(() => import('./pages/GoalsPage').then(m => ({ default: m.GoalsPage })));
 const BrainPage     = lazy(() => import('./pages/BrainPage').then(m => ({ default: m.BrainPage })));
 const SettingsPage  = lazy(() => import('./pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
@@ -42,6 +43,7 @@ function Layout() {
           <Route path="/fitness"  element={<FitnessPage />}   />
           {/* /meals kept so existing bookmarks still land somewhere */}
           <Route path="/meals"    element={<Navigate to="/fitness" replace />} />
+          <Route path="/academics" element={<AcademicsPage />} />
           <Route path="/goals"    element={<GoalsPage />}     />
           <Route path="/settings" element={<SettingsPage />}  />
         </Routes>

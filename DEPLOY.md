@@ -57,6 +57,9 @@ idempotent and non-destructive:
 - `005_reconcile_live_schema.sql`  (task↔project + habit_completions)
 - `006_physical_activity.sql`      (workouts/physique sync)
 - `007_google_tokens.sql`          (Google token store — required for Calendar)
+- `008_task_completed_at.sql`    (done-task expiry)
+- `009_workout_day_overrides.sql` (per-day workout edits)
+- `010_academic_plans.sql`       (Academics course planner sync)
 
 ⚠️ Never run `supabase db push` — your live schema has drifted from the older
 migrations and a push would try to force conflicting shapes.

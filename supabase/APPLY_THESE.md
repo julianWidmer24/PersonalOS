@@ -68,6 +68,23 @@ After running, test:
 3. Hit "Use routine" on that day → the override clears (row deleted if the day
    had no photo and wasn't confirmed).
 
+## 5. `010_academic_plans.sql` — apply to sync the Academics planner ✅
+Creates `academic_plans`: one row per user holding the whole planner document
+(the three graduation plans, their semesters, and the courses in them) as jsonb.
+
+Same offline-first fallback as 006: before you run it, the Academics tab keeps
+everything in that browser's localStorage and the remote calls silently no-op;
+after you run it, the same edits sync across devices. Writes are debounced ~600ms
+so typing in the course editor doesn't hammer the table.
+
+After running, test:
+1. Open **Academics**, edit a course code → `academic_plans` has one row for you
+   and its `data` reflects the edit.
+2. Switch plans (Sprint / Balanced / Internship-first), reload → the plan you
+   left active is still active.
+3. Open the app in a second browser/device → the same plans load.
+4. Hit **Reset** on a plan → it returns to the seeded version and syncs.
+
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
   keep device-local.

@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { label: 'Brain',    to: '/brain'     },
   { label: 'Calendar', to: '/calendar'  },
   { label: 'Fitness',  to: '/fitness'   },
+  { label: 'Academics', to: '/academics' },
   { label: 'Goals',    to: '/goals'     },
   { label: 'Settings', to: '/settings'  },
 ] as const;
