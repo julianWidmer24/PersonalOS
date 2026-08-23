@@ -86,6 +86,9 @@ async function patchTaskRow(id: string, patch: Record<string, unknown>) {
   return error;
 }
 
+// tasks.due_date is a real date column — only send it something it can store.
+const toDueDate = (due?: string) => (due && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : null);
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToTask(row: any): Task {
   return {
@@ -94,7 +97,7 @@ function rowToTask(row: any): Task {
     tag:       tagFromCategory(row.category),
     priority:  priorityFromScore(row.priority ?? 2),
     status:    STATUS_FROM_DB[row.status] ?? 'now',
-    due:       row.due_date ? String(row.due_date) : 'Today',
+    due:       row.due_date ? String(row.due_date) : '—',
     est:       '—',
     projectId: row.project_id ?? null,
     isStarred: row.starred ?? false,
@@ -484,7 +487,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     const optimisticId = 't' + Math.random().toString(36).slice(2, 8);
     const optimistic: Task = {
       id: optimisticId,
-      status: 'now', priority: 'P1', tag: 'personal', est: '—', due: 'Today', projectId: null,
+      status: 'now', priority: 'P1', tag: 'personal', est: '—', due: '—', projectId: null,
       title: '', isStarred: false,
       ...data,
     };
@@ -496,6 +499,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       priority: priorityToScore(optimistic.priority),
       status:   STATUS_TO_DB[optimistic.status] ?? optimistic.status,
       starred:  optimistic.isStarred ?? false,
+      due_date: toDueDate(optimistic.due),
     };
     if (optimistic.projectId) payload.project_id = optimistic.projectId;
     const insert = (p: Record<string, unknown>) => supabase.from('tasks').insert(p).select().single();
@@ -526,6 +530,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       dbPatch.completed_at = patch.status === 'done' ? new Date().toISOString() : null;
     }
     if (patch.isStarred !== undefined) dbPatch.starred  = patch.isStarred;
+    if (patch.due       !== undefined) dbPatch.due_date = toDueDate(patch.due);
     if (patch.projectId !== undefined) dbPatch.project_id = patch.projectId;
     if (Object.keys(dbPatch).length) {
       patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })

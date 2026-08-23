@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { PRIORITY_COLORS } from '../lib/dashboardHelpers';
+import { PRIORITY_COLORS, fmtDue, isDueToday, daysUntilDue } from '../lib/dashboardHelpers';
 import type { Project, Task } from '../types';
 import { Card } from './shared/Card';
 import { IconBtn } from './shared/IconBtn';
@@ -99,6 +99,7 @@ function ProjectEditor({ initial, onSave, onCancel }: ProjectEditorProps) {
 
 // ── Project linked-task row ───────────────────────────────────
 function ProjectTaskRow({ t, onToggle, onUnlink }: { t: Task; onToggle: (id: string) => void; onUnlink: (id: string) => void }) {
+  const { setModal } = useDashboard();
   const isDone = t.status === 'done';
   return (
     <li className="group flex items-center gap-2 py-1.5 border-b border-[var(--line)]/50 last:border-b-0">
@@ -114,10 +115,14 @@ function ProjectTaskRow({ t, onToggle, onUnlink }: { t: Task; onToggle: (id: str
         )}
       </button>
       <span className="text-[10px] tnum font-mono shrink-0 w-6" style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
-      <div className={`text-[12.5px] flex-1 min-w-0 truncate ${isDone ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'}`}>
+      <div
+        onClick={() => setModal({ kind: 'task', taskId: t.id })}
+        title="Edit task"
+        className={`text-[12.5px] flex-1 min-w-0 truncate cursor-text hover:text-[var(--accent)] ${isDone ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'}`}
+      >
         {t.title}
       </div>
-      <span className="text-[10.5px] text-[var(--t3)] tnum shrink-0">{t.due}</span>
+      <span className="text-[10.5px] text-[var(--t3)] tnum shrink-0">{fmtDue(t.due)}</span>
       <button
         onClick={() => onUnlink(t.id)}
         className="text-[var(--t4)] hover:text-[var(--t2)] opacity-0 group-hover:opacity-100 text-[14px] leading-none w-4 h-4 grid place-items-center shrink-0"
@@ -130,7 +135,11 @@ function ProjectTaskRow({ t, onToggle, onUnlink }: { t: Task; onToggle: (id: str
 // ── Project today strip ───────────────────────────────────────
 function ProjectTodayStrip({ projects, tasks, onToggleTask }: { projects: Project[]; tasks: Task[]; onToggleTask: (id: string) => void }) {
   const today = tasks
-    .filter(t => t.projectId && t.status !== 'done' && /today|tomorrow/i.test(t.due))
+    .filter(t => {
+      if (!t.projectId || t.status === 'done') return false;
+      const days = daysUntilDue(t.due);
+      return days === null ? /today|tomorrow/i.test(t.due) : days <= 1;
+    })
     .sort((a, b) => {
       const order: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
       return (order[a.priority] ?? 9) - (order[b.priority] ?? 9);
@@ -156,7 +165,7 @@ function ProjectTodayStrip({ projects, tasks, onToggleTask }: { projects: Projec
               <span className="text-[12.5px] text-[var(--t1)] flex-1 min-w-0 truncate">{t.title}</span>
               <span className="px-1.5 py-0.5 rounded text-[9.5px] font-medium shrink-0"
                 style={{ color: p?.color, background: `${p?.color}15` }}>{p?.title}</span>
-              <span className="text-[10.5px] text-[var(--t3)] tnum shrink-0 w-14 text-right">{t.due}</span>
+              <span className="text-[10.5px] text-[var(--t3)] tnum shrink-0 w-14 text-right">{fmtDue(t.due)}</span>
             </li>
           );
         })}
@@ -190,7 +199,7 @@ function ProjectCard({ project, tasks, isOpen, onToggleOpen, onEdit, onDelete, o
   const [newPriority, setNewPriority] = useState<'P0' | 'P1' | 'P2'>('P1');
   const [newDue, setNewDue] = useState('');
 
-  const today = linked.filter(t => /today/i.test(t.due) && t.status !== 'done');
+  const today = linked.filter(t => isDueToday(t.due) && t.status !== 'done');
   const nextUp = linked.filter(t => t.status !== 'done').sort((a, b) => {
     const order: Record<string, number> = { P0: 0, P1: 1, P2: 2 };
     return (order[a.priority] ?? 9) - (order[b.priority] ?? 9);
@@ -293,7 +302,7 @@ function ProjectCard({ project, tasks, isOpen, onToggleOpen, onEdit, onDelete, o
                         className="w-full text-left flex items-center gap-2 px-1.5 py-1 rounded hover:bg-[var(--bg-elev)]">
                         <span className="text-[10px] tnum font-mono shrink-0 w-6" style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
                         <span className="text-[12px] text-[var(--t1)] flex-1 truncate">{t.title}</span>
-                        <span className="text-[10px] text-[var(--t3)] tnum shrink-0">{t.due}</span>
+                        <span className="text-[10px] text-[var(--t3)] tnum shrink-0">{fmtDue(t.due)}</span>
                       </button>
                     </li>
                   ))}

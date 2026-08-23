@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
+import { TAG_COLORS, PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import type { Task, Project } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
@@ -44,6 +44,23 @@ function DeleteBtn({ onDelete }: { onDelete: () => void }) {
   );
 }
 
+function EditBtn({ onEdit }: { onEdit: () => void }) {
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onEdit(); }}
+      title="Edit task"
+      className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-[var(--t3)] hover:text-[var(--t1)] hover:scale-110"
+    >
+      <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+        <path
+          d="M8.2 1.8a1.13 1.13 0 0 1 1.6 1.6L4.4 8.8l-2.1.5.5-2.1 5.4-5.4zM2 10.5h8"
+          stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"
+        />
+      </svg>
+    </button>
+  );
+}
+
 const TASK_COLUMNS = [
   { id: 'now',   label: 'Now',   hint: 'in focus'  },
   { id: 'next',  label: 'Next',  hint: 'this week' },
@@ -56,6 +73,7 @@ interface TaskRowProps {
   onToggle: (id: string) => void;
   onStar?: (id: string) => void;
   onDelete?: (id: string) => void;
+  onEdit?: (id: string) => void;
   onDragStart?: (id: string) => void;
   onDragOver?: (id: string) => void;
   onDrop?: (id: string) => void;
@@ -63,7 +81,7 @@ interface TaskRowProps {
   project?: Project | null;
 }
 
-function TaskRow({ t, onToggle, onStar, onDelete, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
+function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
   const tagColor = TAG_COLORS[t.tag] || {};
   const isDone = t.status === 'done';
   return (
@@ -86,7 +104,11 @@ function TaskRow({ t, onToggle, onStar, onDelete, onDragStart, onDragOver, onDro
         )}
       </button>
       <div className="flex-1 min-w-0">
-        <div className={`text-[12.5px] leading-tight ${isDone ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'} break-words`}>
+        <div
+          onClick={() => onEdit?.(t.id)}
+          title={onEdit ? 'Edit task' : undefined}
+          className={`text-[12.5px] leading-tight ${isDone ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'} break-words ${onEdit ? 'cursor-text hover:text-[var(--accent)]' : ''}`}
+        >
           {t.title}
         </div>
         {!compact && (
@@ -100,13 +122,14 @@ function TaskRow({ t, onToggle, onStar, onDelete, onDragStart, onDragOver, onDro
                 {project.title}
               </span>
             )}
-            <span className="text-[10.5px] text-[var(--t3)] truncate">{t.due}</span>
+            <span className="text-[10.5px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
             <span className="text-[10.5px] text-[var(--t4)] tnum ml-auto">{t.est}</span>
           </div>
         )}
       </div>
-      {(onStar || onDelete) && (
+      {(onStar || onDelete || onEdit) && (
         <div className="mt-0.5 flex items-center gap-2">
+          {onEdit && <EditBtn onEdit={() => onEdit(t.id)} />}
           {onStar && <StarBtn starred={!!t.isStarred} onStar={() => onStar(t.id)} />}
           {onDelete && <DeleteBtn onDelete={() => onDelete(t.id)} />}
         </div>
@@ -119,6 +142,7 @@ export function TaskCRM() {
   const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, setModal } = useDashboard();
   const [dragId, setDragId] = useState<string | null>(null);
   const [view, setView] = useState('Pipeline');
+  const openTask = (id: string) => setModal({ kind: 'task', taskId: id });
 
   const projById = useMemo(() => Object.fromEntries((projects || []).map(p => [p.id, p])), [projects]);
 
@@ -201,7 +225,11 @@ export function TaskCRM() {
                                 )}
                               </button>
                               <div className="min-w-0 flex-1">
-                                <div className={`text-[12px] leading-[1.3] ${col.id === 'done' ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'} break-words`}>
+                                <div
+                                  onClick={() => openTask(t.id)}
+                                  title="Edit task"
+                                  className={`text-[12px] leading-[1.3] cursor-text hover:text-[var(--accent)] ${col.id === 'done' ? 'line-through text-[var(--t3)]' : 'text-[var(--t1)]'} break-words`}
+                                >
                                   {t.title}
                                 </div>
                                 <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
@@ -213,8 +241,9 @@ export function TaskCRM() {
                                       {p.title}
                                     </span>
                                   )}
-                                  <span className="text-[10px] text-[var(--t3)] truncate">{t.due}</span>
+                                  <span className="text-[10px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
                                   <span className="ml-auto flex items-center gap-2">
+                                    <EditBtn onEdit={() => openTask(t.id)} />
                                     <StarBtn starred={!!t.isStarred} onStar={() => starTask(t.id)} />
                                     <DeleteBtn onDelete={() => removeTask(t.id)} />
                                   </span>
@@ -235,7 +264,7 @@ export function TaskCRM() {
         <ul className="space-y-0">
           {tasks.map(t => (
             <TaskRow
-              key={t.id} t={t} onToggle={toggleTask} onStar={starTask} onDelete={removeTask}
+              key={t.id} t={t} onToggle={toggleTask} onStar={starTask} onDelete={removeTask} onEdit={openTask}
               project={t.projectId ? projById[t.projectId] : null}
               onDragStart={onDragStart} onDrop={onDrop} onDragOver={() => {}}
               compact={false}

@@ -1,9 +1,9 @@
 import { useDashboard } from '../context/DashboardContext';
-import { PRIORITY_COLORS } from '../lib/dashboardHelpers';
+import { PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import { Card } from './shared/Card';
 
 export function KeyTasks() {
-  const { tasks, toggleTask, starTask } = useDashboard();
+  const { tasks, toggleTask, starTask, setModal } = useDashboard();
   const starred = tasks.filter(t => t.isStarred && t.status !== 'done');
 
   if (starred.length === 0) return null;
@@ -18,10 +18,14 @@ export function KeyTasks() {
               className="mt-0.5 w-3.5 h-3.5 rounded-[4px] border border-[var(--t3)] hover:border-[var(--t1)] grid place-items-center transition-colors shrink-0"
             />
             <div className="flex-1 min-w-0">
-              <div className="text-[12.5px] text-[var(--t1)] leading-tight">{t.title}</div>
+              <div
+                onClick={() => setModal({ kind: 'task', taskId: t.id })}
+                title="Edit task"
+                className="text-[12.5px] text-[var(--t1)] leading-tight cursor-text hover:text-[var(--accent)]"
+              >{t.title}</div>
               <div className="mt-0.5 flex items-center gap-1.5">
                 <span className="text-[10px] tnum font-mono" style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
-                <span className="text-[10.5px] text-[var(--t3)]">{t.due}</span>
+                <span className="text-[10.5px] text-[var(--t3)]">{fmtDue(t.due)}</span>
               </div>
             </div>
             <button

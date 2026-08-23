@@ -12,7 +12,12 @@
       "Read(//opt/homebrew/bin/**)",
       "Bash(npm -v)",
       "Bash(ls node_modules)",
-      "Bash(grep -iA5 \"create table.*tasks\\\\|status\\\\|check\")"
+      "Bash(grep -iA5 \"create table.*tasks\\\\|status\\\\|check\")",
+      "Bash(npx eslint *)",
+      "Bash(curl -s http://localhost:5173/src/components/shared/WidgetGrid.tsx)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/components/Calendar.tsx)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5173/src/pages/DashboardPage.tsx)",
+      "Bash(grep -n \"w?.name\\\\|dayIndex\\\\|wrapIdx\\\\|title={\\\\`\" src/components/PhysicalActivity.tsx)"
     ]
   }
 }

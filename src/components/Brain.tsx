@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useDashboard } from '../context/DashboardContext';
 import { supabase } from '../lib/supabase';
-import { TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
+import { TAG_COLORS, PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import type { LifeArea, Task } from '../types';
 
 // classify returns { ok, result }. For the plain-text advisor prompts the
@@ -53,7 +53,7 @@ function TaskItem({ t }: { t: Task }) {
         <div className="mt-0.5 flex items-center gap-1.5 text-[10px]">
           <span style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
           <span className="px-1.5 py-0.5 rounded" style={{ color: tagColor.fg, background: tagColor.bg }}>{t.tag}</span>
-          <span className="text-[var(--t4)]">{t.due}</span>
+          <span className="text-[var(--t4)]">{fmtDue(t.due)}</span>
         </div>
       </div>
     </div>
