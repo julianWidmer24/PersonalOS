@@ -139,24 +139,33 @@ function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onDragStart, onDragOve
 }
 
 export function TaskCRM() {
-  const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, setModal } = useDashboard();
+  const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, updateTask, setModal } = useDashboard();
   const [dragId, setDragId] = useState<string | null>(null);
   const [view, setView] = useState('Pipeline');
   const openTask = (id: string) => setModal({ kind: 'task', taskId: id });
 
   const projById = useMemo(() => Object.fromEntries((projects || []).map(p => [p.id, p])), [projects]);
 
+  // Ordering is local-only, but a drag that lands in another column also
+  // changes the task's status — that has to go through updateTask to persist.
+  const commitMove = (id: string, status: Task['status'], next: Task[]) => {
+    const from = tasks.find(t => t.id === id)?.status;
+    reorderTasks(next);
+    if (from !== status) updateTask(id, { status });
+    setDragId(null);
+  };
+
   const onDragStart = (id: string) => setDragId(id);
   const onDrop = (overId: string) => {
     if (!dragId || dragId === overId) return;
     const idx = tasks.findIndex(t => t.id === dragId);
     const overIdx = tasks.findIndex(t => t.id === overId);
+    if (idx === -1 || overIdx === -1) return;
     const overStatus = tasks[overIdx].status;
     const moved = { ...tasks[idx], status: overStatus };
     const next = tasks.filter(t => t.id !== dragId);
     next.splice(overIdx > idx ? overIdx - 1 : overIdx, 0, moved);
-    reorderTasks(next);
-    setDragId(null);
+    commitMove(dragId, overStatus, next);
   };
 
   const byStatus = (s: string) => tasks.filter(t => t.status === s);
@@ -185,9 +194,11 @@ export function TaskCRM() {
                 onDrop={e => {
                   e.preventDefault();
                   if (!dragId) return;
-                  const moved = { ...tasks.find(t => t.id === dragId)!, status: col.id as Task['status'] };
-                  reorderTasks([moved, ...tasks.filter(t => t.id !== dragId)]);
-                  setDragId(null);
+                  const dragged = tasks.find(t => t.id === dragId);
+                  if (!dragged) { setDragId(null); return; }
+                  const status = col.id as Task['status'];
+                  const moved = { ...dragged, status };
+                  commitMove(dragId, status, [moved, ...tasks.filter(t => t.id !== dragId)]);
                 }}
                 className="rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]/40"
               >
