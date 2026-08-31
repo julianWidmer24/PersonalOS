@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { KIND_FROM_NAME, todayKey, resolveDay } from '../hooks/usePhysical';
 import { usePhysicalData } from '../context/PhysicalContext';
 import { Card } from './shared/Card';
 import { IconBtn } from './shared/IconBtn';
 import { WorkoutDayEditor } from './WorkoutDayEditor';
+import { PhotoLightbox } from './shared/PhotoLightbox';
+import { buildWorkoutGallery } from '../lib/workoutPhotos';
 
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -25,6 +27,14 @@ export function WorkoutCalendar() {
   const [monthOffset, setMonthOffset] = useState(0);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null);
+
+  // Same carousel the workout card opens — the full photo history, oldest first.
+  const gallery = useMemo(() => buildWorkoutGallery(routine, log), [routine, log]);
+  const openPhoto = (key: string) => {
+    const i = gallery.indexByKey.get(key);
+    if (i !== undefined) setLightboxAt(i);
+  };
 
   const now = new Date();
   const todayK = todayKey(now);
@@ -183,17 +193,44 @@ export function WorkoutCalendar() {
           <span className="flex items-center gap-1">
             <span className="w-1 h-1 rounded-full bg-[var(--t3)]" /> edited
           </span>
-          <span className="ml-auto tnum">{photoCount} photo{photoCount === 1 ? '' : 's'} this month</span>
+          {photoCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                const first = cells.find(c => c.photo);
+                if (first) openPhoto(first.key);
+              }}
+              className="ml-auto tnum hover:text-[var(--accent)] transition-colors"
+              title="Open the photo carousel"
+            >
+              {photoCount} photo{photoCount === 1 ? '' : 's'} this month ↗
+            </button>
+          ) : (
+            <span className="ml-auto tnum">no photos this month</span>
+          )}
         </div>
 
         {selected && (
           <div className="rounded-lg border border-[var(--line-hi)] bg-[var(--bg-elev)] p-3 flex gap-3">
             {selected.photo ? (
-              <img
-                src={selected.photo}
-                alt={`Progress photo from ${selected.key}`}
-                className="w-24 h-32 rounded-md object-cover border border-[var(--line)] shrink-0"
-              />
+              <button
+                type="button"
+                onClick={() => openPhoto(selected.key)}
+                title="Expand photo"
+                aria-label={`Expand the progress photo from ${selected.key}`}
+                className="relative w-24 h-32 rounded-md overflow-hidden border border-[var(--line)] hover:border-[var(--accent)] shrink-0 group transition-colors"
+              >
+                <img
+                  src={selected.photo}
+                  alt={`Progress photo from ${selected.key}`}
+                  className="w-full h-full object-cover"
+                />
+                <span className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="text-white">
+                    <path d="M6.5 2H2v4.5M9.5 14H14V9.5M2 9.5V14h4.5M14 6.5V2H9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              </button>
             ) : (
               <div className="w-24 h-32 rounded-md border border-dashed border-[var(--line-hi)] grid place-items-center text-[9.5px] text-[var(--t4)] text-center px-2 shrink-0">
                 no photo
@@ -262,6 +299,15 @@ export function WorkoutCalendar() {
           />
         )}
       </div>
+
+      {lightboxAt !== null && gallery.photos.length > 0 && (
+        <PhotoLightbox
+          photos={gallery.photos}
+          index={Math.min(lightboxAt, gallery.photos.length - 1)}
+          onIndexChange={setLightboxAt}
+          onClose={() => setLightboxAt(null)}
+        />
+      )}
     </Card>
   );
 }

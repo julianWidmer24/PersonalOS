@@ -77,6 +77,24 @@ body {
   animation: flameShimmer 1.8s ease-in-out infinite;
 }
 
+/* Lightbox overlay entrance */
+@keyframes lightboxIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.lightbox-in {
+  animation: lightboxIn 0.16s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lightbox-in {
+    animation: none;
+  }
+}
+
 /* Drag-handle cursor */
 [draggable='true'] {
   cursor: grab;

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { KIND_FROM_NAME, todayKey, parseRoutine, resolveDay, computeStreak, SEED_ROUTINE_TEXT } from '../hooks/usePhysical';
 import { usePhysicalData } from '../context/PhysicalContext';
 import { usePhysique } from '../hooks/usePhysique';
@@ -7,6 +7,8 @@ import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
 import { IconBtn } from './shared/IconBtn';
 import { WorkoutDayEditor } from './WorkoutDayEditor';
+import { PhotoLightbox, type LightboxPhoto } from './shared/PhotoLightbox';
+import { buildWorkoutGallery } from '../lib/workoutPhotos';
 
 // ── Routine importer ──────────────────────────────────────────
 interface RoutineImporterProps {
@@ -74,12 +76,11 @@ function RoutineImporter({ initial, onImport, onClose }: RoutineImporterProps) {
 }
 
 // ── Photo tile ────────────────────────────────────────────────
-function PhotoTile({ entry, size = 'sm' }: { entry: PhysiqueEntry; size?: 'sm' | 'lg' }) {
-  return (
-    <div
-      className="relative shrink-0 rounded-md overflow-hidden group"
-      style={{ width: size === 'lg' ? 120 : 56, height: size === 'lg' ? 160 : 72, background: 'var(--bg-elev)' }}
-    >
+function PhotoTile({ entry, size = 'sm', onOpen }: { entry: PhysiqueEntry; size?: 'sm' | 'lg'; onOpen?: () => void }) {
+  const dims = { width: size === 'lg' ? 120 : 56, height: size === 'lg' ? 160 : 72, background: 'var(--bg-elev)' };
+
+  const inner = (
+    <>
       {entry.dataUrl ? (
         <img src={entry.dataUrl} alt={entry.label} className="w-full h-full object-cover" />
       ) : (
@@ -91,10 +92,33 @@ function PhotoTile({ entry, size = 'sm' }: { entry: PhysiqueEntry; size?: 'sm' |
           </svg>
         </div>
       )}
+      {onOpen && (
+        <div className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="text-white drop-shadow">
+            <path d="M6.5 2H2v4.5M9.5 14H14V9.5M2 9.5V14h4.5M14 6.5V2H9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
       <div className="absolute inset-x-0 bottom-0 px-1 py-0.5 bg-gradient-to-t from-black/80 to-transparent">
         <div className="text-[8.5px] tnum text-[var(--t1)] font-medium leading-none">{entry.label}</div>
       </div>
-    </div>
+    </>
+  );
+
+  if (!onOpen) {
+    return <div className="relative shrink-0 rounded-md overflow-hidden group" style={dims}>{inner}</div>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`Expand ${entry.label}`}
+      aria-label={`Expand ${entry.label} photo`}
+      className="relative shrink-0 rounded-md overflow-hidden group ring-0 hover:ring-1 focus-visible:ring-1 ring-[var(--accent)] outline-none transition-all"
+      style={dims}
+    >
+      {inner}
+    </button>
   );
 }
 
@@ -107,8 +131,34 @@ export function PhysicalActivity() {
   const [entries, setEntries] = usePhysique();
   const [thisWeek, setThisWeek] = useState<PhysiqueEntry | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [lightboxAt, setLightboxAt] = useState<number | null>(null);
+  const [workoutAt, setWorkoutAt] = useState<number | null>(null);
   const photoRef = useRef<HTMLInputElement>(null);
   const workoutPhotoRef = useRef<HTMLInputElement>(null);
+
+  // The check-in carousel: this week's pending shot (if any) first, then the
+  // logged timeline. Entries without an image can't be expanded.
+  const { gallery, galleryIndex } = useMemo(() => {
+    const withPhotos = [...(thisWeek ? [thisWeek] : []), ...entries].filter(e => e.dataUrl);
+    const idxMap = new Map<PhysiqueEntry, number>();
+    withPhotos.forEach((e, i) => idxMap.set(e, i));
+    return {
+      gallery: withPhotos.map<LightboxPhoto>(e => ({
+        src: e.dataUrl!,
+        label: e.label,
+        meta: e === thisWeek ? 'Pending · not logged yet' : e.date,
+      })),
+      galleryIndex: idxMap,
+    };
+  }, [thisWeek, entries]);
+
+  // Workout photos, oldest first — the 7-day strip, today's shot and the
+  // calendar all open into this same carousel.
+  const workoutGallery = useMemo(() => buildWorkoutGallery(routine, log), [routine, log]);
+  const openWorkoutPhoto = (key: string) => {
+    const i = workoutGallery.indexByKey.get(key);
+    if (i !== undefined) setWorkoutAt(i);
+  };
 
   const now = new Date();
   const idx = resolveDay(routine, log, now).idx;
@@ -304,7 +354,20 @@ export function PhysicalActivity() {
               {viewing ? (
                 <div className="mt-3 flex items-center gap-2">
                   {viewing.entry?.photo && (
-                    <img src={viewing.entry.photo} alt="" className="w-10 h-10 rounded-md object-cover border border-[var(--line)]" />
+                    <button
+                      type="button"
+                      onClick={() => openWorkoutPhoto(viewing.key)}
+                      title="Expand photo"
+                      aria-label="Expand this day's photo"
+                      className="relative w-10 h-10 rounded-md overflow-hidden border border-[var(--line)] hover:border-[var(--accent)] group transition-colors"
+                    >
+                      <img src={viewing.entry.photo} alt="" className="w-full h-full object-cover" />
+                      <span className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" className="text-white">
+                          <path d="M6.5 2H2v4.5M9.5 14H14V9.5M2 9.5V14h4.5M14 6.5V2H9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </span>
+                    </button>
                   )}
                   <span className="text-[10.5px] text-[var(--t4)] flex-1">Past day · view only</span>
                   <button
@@ -337,20 +400,26 @@ export function PhysicalActivity() {
                       <path d="M4 20h4L19 9a2 2 0 00-3-3L5 17v3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
                     </svg>
                   </button>
+                  {todayEntry?.photo && (
+                    <button
+                      onClick={() => openWorkoutPhoto(todayK)}
+                      className="px-2 py-1.5 rounded-md border border-[var(--line-hi)] hover:border-[var(--accent)] transition-colors"
+                      title="View today's photo"
+                      aria-label="View today's photo"
+                    >
+                      <img src={todayEntry.photo} alt="" className="w-4 h-4 rounded object-cover" />
+                    </button>
+                  )}
                   <button
                     onClick={() => workoutPhotoRef.current?.click()}
                     className="px-2 py-1.5 rounded-md border border-[var(--line-hi)] text-[var(--t2)] hover:text-[var(--t1)]"
-                    title="Add photo"
+                    title={todayEntry?.photo ? 'Replace photo' : 'Add photo'}
                   >
-                    {todayEntry?.photo ? (
-                      <img src={todayEntry.photo} alt="" className="w-4 h-4 rounded object-cover" />
-                    ) : (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                        <rect x="3" y="6" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
-                        <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="1.6" />
-                        <path d="M8 6l1.5-2h5L16 6" stroke="currentColor" strokeWidth="1.6" />
-                      </svg>
-                    )}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                      <rect x="3" y="6" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.6" />
+                      <circle cx="12" cy="13" r="3.5" stroke="currentColor" strokeWidth="1.6" />
+                      <path d="M8 6l1.5-2h5L16 6" stroke="currentColor" strokeWidth="1.6" />
+                    </svg>
                   </button>
                   <input ref={workoutPhotoRef} type="file" accept="image/*" className="hidden"
                     onChange={e => onWorkoutPhoto(e.target.files?.[0])} />
@@ -361,7 +430,19 @@ export function PhysicalActivity() {
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--t3)]">Last 7 days</div>
-                <div className="text-[10.5px] text-[var(--t3)] tnum">{days.filter(d => d.entry?.confirmed).length}/7</div>
+                <div className="flex items-center gap-2">
+                  {workoutGallery.photos.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setWorkoutAt(workoutGallery.photos.length - 1)}
+                      title="Open the photo carousel"
+                      className="text-[10px] text-[var(--t3)] hover:text-[var(--accent)] transition-colors"
+                    >
+                      {workoutGallery.photos.length} photo{workoutGallery.photos.length === 1 ? '' : 's'} ↗
+                    </button>
+                  )}
+                  <div className="text-[10.5px] text-[var(--t3)] tnum">{days.filter(d => d.entry?.confirmed).length}/7</div>
+                </div>
               </div>
               <div className="flex gap-1">
                 {days.map((d, i) => {
@@ -380,7 +461,10 @@ export function PhysicalActivity() {
                       style={done ? { background: k.bg } : {}}
                     >
                       {d.entry?.photo && (
-                        <img src={d.entry.photo} alt="" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                        <>
+                          <img src={d.entry.photo} alt="" className="absolute inset-0 w-full h-full object-cover opacity-50" />
+                          <span className="absolute top-0.5 right-0.5 w-1 h-1 rounded-full bg-[var(--accent)]" />
+                        </>
                       )}
                       <div className="relative">
                         <div className="text-[8.5px] uppercase tracking-wider text-[var(--t3)]">
@@ -423,9 +507,21 @@ export function PhysicalActivity() {
               </button>
             ) : (
               <div className="flex gap-3 items-stretch">
-                <div className="relative rounded-md overflow-hidden border border-[var(--line-hi)]" style={{ width: 92, height: 116 }}>
+                <button
+                  type="button"
+                  onClick={() => setLightboxAt(0)}
+                  title="Expand photo"
+                  aria-label="Expand this week's photo"
+                  className="relative rounded-md overflow-hidden border border-[var(--line-hi)] group hover:border-[var(--accent)] transition-colors"
+                  style={{ width: 92, height: 116 }}
+                >
                   <img src={thisWeek.dataUrl!} alt="" className="w-full h-full object-cover" />
-                </div>
+                  <span className="absolute inset-0 grid place-items-center bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" className="text-white">
+                      <path d="M6.5 2H2v4.5M9.5 14H14V9.5M2 9.5V14h4.5M14 6.5V2H9.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                </button>
                 <div className="flex-1 flex flex-col justify-between min-w-0">
                   <div>
                     <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--t3)]">Pending</div>
@@ -450,15 +546,54 @@ export function PhysicalActivity() {
             <div className="flex flex-col">
               <div className="flex items-center justify-between mb-1.5">
                 <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--t3)]">Timeline</div>
-                <div className="text-[10.5px] text-[var(--t3)] tnum">{entries.length} weeks</div>
+                <div className="flex items-center gap-2">
+                  {gallery.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setLightboxAt(0)}
+                      className="text-[10px] text-[var(--t3)] hover:text-[var(--accent)] transition-colors"
+                    >
+                      expand ↗
+                    </button>
+                  )}
+                  <div className="text-[10.5px] text-[var(--t3)] tnum">{entries.length} weeks</div>
+                </div>
               </div>
               <div className="flex gap-1.5 overflow-x-auto pos-scroll pb-1">
-                {entries.map(e => <PhotoTile key={e.week} entry={e} size="sm" />)}
+                {entries.length === 0 && (
+                  <div className="text-[11px] text-[var(--t4)] italic py-2">no check-ins logged yet</div>
+                )}
+                {entries.map((e, i) => (
+                  <PhotoTile
+                    key={e.id ?? `${e.week}-${i}`}
+                    entry={e}
+                    size="sm"
+                    onOpen={galleryIndex.has(e) ? () => setLightboxAt(galleryIndex.get(e)!) : undefined}
+                  />
+                ))}
               </div>
             </div>
           </>
         )}
       </div>
+
+      {workoutAt !== null && workoutGallery.photos.length > 0 && (
+        <PhotoLightbox
+          photos={workoutGallery.photos}
+          index={Math.min(workoutAt, workoutGallery.photos.length - 1)}
+          onIndexChange={setWorkoutAt}
+          onClose={() => setWorkoutAt(null)}
+        />
+      )}
+
+      {lightboxAt !== null && gallery.length > 0 && (
+        <PhotoLightbox
+          photos={gallery}
+          index={Math.min(lightboxAt, gallery.length - 1)}
+          onIndexChange={setLightboxAt}
+          onClose={() => setLightboxAt(null)}
+        />
+      )}
     </Card>
   );
 }
