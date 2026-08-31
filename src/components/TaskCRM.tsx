@@ -68,6 +68,31 @@ const TASK_COLUMNS = [
   { id: 'done',  label: 'Done',  hint: 'archive'   },
 ] as const;
 
+const COLLAPSE_KEY = 'pos:tasks:collapsed-columns';
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    const v = JSON.parse(localStorage.getItem(COLLAPSE_KEY) || 'null');
+    if (v && typeof v === 'object') return v;
+  } catch { /* ignore */ }
+  return {};
+}
+
+function persistCollapsed(next: Record<string, boolean>) {
+  try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+}
+
+function Chevron({ collapsed }: { collapsed: boolean }) {
+  return (
+    <svg
+      width="9" height="9" viewBox="0 0 10 10" fill="none"
+      className={`shrink-0 text-[var(--t3)] transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}`}
+    >
+      <path d="M1.5 3.25L5 6.75l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 interface TaskRowProps {
   t: Task;
   onToggle: (id: string) => void;
@@ -142,6 +167,7 @@ export function TaskCRM() {
   const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, updateTask, setModal } = useDashboard();
   const [dragId, setDragId] = useState<string | null>(null);
   const [view, setView] = useState('Pipeline');
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
   const openTask = (id: string) => setModal({ kind: 'task', taskId: id });
 
   const projById = useMemo(() => Object.fromEntries((projects || []).map(p => [p.id, p])), [projects]);
@@ -153,6 +179,14 @@ export function TaskCRM() {
     reorderTasks(next);
     if (from !== status) updateTask(id, { status });
     setDragId(null);
+  };
+
+  const toggleCollapsed = (colId: string) => {
+    setCollapsed(prev => {
+      const next = { ...prev, [colId]: !prev[colId] };
+      persistCollapsed(next);
+      return next;
+    });
   };
 
   const onDragStart = (id: string) => setDragId(id);
@@ -187,6 +221,7 @@ export function TaskCRM() {
         <div className="flex flex-col gap-3">
           {TASK_COLUMNS.map(col => {
             const colTasks = byStatus(col.id);
+            const isCollapsed = !!collapsed[col.id];
             return (
               <section
                 key={col.id}
@@ -202,14 +237,25 @@ export function TaskCRM() {
                 }}
                 className="rounded-lg border border-[var(--line)] bg-[var(--bg-elev)]/40"
               >
-                <header className="flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b border-[var(--line)]/60">
+                <header
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={!isCollapsed}
+                  title={isCollapsed ? `Show ${col.label} tasks` : `Hide ${col.label} tasks`}
+                  onClick={() => toggleCollapsed(col.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCollapsed(col.id); }
+                  }}
+                  className={`flex items-center justify-between px-3 pt-2.5 pb-1.5 border-b ${isCollapsed ? 'border-transparent' : 'border-[var(--line)]/60'} cursor-pointer select-none rounded-t-lg hover:bg-[var(--bg-card-hi)]/40 transition-colors`}
+                >
                   <div className="flex items-center gap-2">
+                    <Chevron collapsed={isCollapsed} />
                     <span className="text-[11.5px] font-medium text-[var(--t1)] uppercase tracking-[0.08em]">{col.label}</span>
                     <span className="text-[10.5px] text-[var(--t3)] tnum px-1.5 py-0.5 rounded bg-[var(--bg-card)]">{colTasks.length}</span>
-                    <span className="text-[10px] text-[var(--t4)]">{col.hint}</span>
+                    <span className="text-[10px] text-[var(--t4)]">{isCollapsed ? 'hidden' : col.hint}</span>
                   </div>
                 </header>
-                <div className="p-2">
+                <div className={`p-2 ${isCollapsed ? 'hidden' : ''}`}>
                   {colTasks.length === 0 ? (
                     <div className="text-[11px] text-[var(--t4)] italic px-2 py-2">drop tasks here</div>
                   ) : (
