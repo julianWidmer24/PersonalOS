@@ -44,6 +44,10 @@ export interface CalendarEvent {
   end: number;
   kind: EventKind;
   loc: string;
+  /** Google Calendar this came from (absent for locally-derived events). */
+  calendar?: string;
+  /** That calendar's Google colour, as a hex string. */
+  calendarColor?: string;
   _derived?: boolean;
 }
 

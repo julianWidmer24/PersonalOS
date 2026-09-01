@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { supabase } from '../lib/supabase';
 import type { CalendarEvent } from '../types';
 
@@ -21,36 +21,57 @@ export interface GoogleCalendarState {
   refresh: () => void;
 }
 
+type Snapshot = Omit<GoogleCalendarState, 'refresh'>;
+
+// One shared fetch for the whole app. Several widgets read the calendar now
+// (the grid, the next-up countdown), and each mounting its own copy of this
+// hook would fire a duplicate edge-function call on every page load.
+const EMPTY: CalendarEvent[] = [];
+let snapshot: Snapshot = { connected: false, email: null, events: EMPTY, loading: true };
+let inflight: Promise<void> | null = null;
+const subscribers = new Set<() => void>();
+
+function setSnapshot(next: Snapshot) {
+  snapshot = next;
+  for (const notify of subscribers) notify();
+}
+
+function fetchEvents(): Promise<void> {
+  if (inflight) return inflight;
+  inflight = supabase.functions
+    .invoke('google-calendar', { body: { weekStart: currentMondayStr() } })
+    .then(({ data, error }) => {
+      if (error || !data || data.error) {
+        setSnapshot({ connected: false, email: null, events: EMPTY, loading: false });
+        return;
+      }
+      setSnapshot({
+        connected: !!data.connected,
+        email: data.email ?? null,
+        events: Array.isArray(data.events) ? (data.events as CalendarEvent[]) : EMPTY,
+        loading: false,
+      });
+    })
+    .finally(() => { inflight = null; });
+  return inflight;
+}
+
+function subscribe(notify: () => void) {
+  subscribers.add(notify);
+  return () => { subscribers.delete(notify); };
+}
+
 // Reads the user's Google Calendar (read-only) for the current week via the
 // google-calendar edge function. Degrades gracefully: if the function/tokens
 // aren't set up, it simply returns connected=false with no events.
 export function useGoogleCalendar(): GoogleCalendarState {
-  const [connected, setConnected] = useState(false);
-  const [email, setEmail] = useState<string | null>(null);
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
-  const [loading, setLoading] = useState(true);
+  const state = useSyncExternalStore(subscribe, () => snapshot, () => snapshot);
 
-  // Promise-based (state updates happen in the async .then callback, never
-  // synchronously in the effect body).
-  const load = useCallback(() => {
-    supabase.functions
-      .invoke('google-calendar', { body: { weekStart: currentMondayStr() } })
-      .then(({ data, error }) => {
-        if (error || !data || data.error) {
-          setConnected(false);
-          setEmail(null);
-          setEvents([]);
-          setLoading(false);
-          return;
-        }
-        setConnected(!!data.connected);
-        setEmail(data.email ?? null);
-        setEvents(Array.isArray(data.events) ? (data.events as CalendarEvent[]) : []);
-        setLoading(false);
-      });
-  }, []);
+  useEffect(() => { fetchEvents(); }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Force a re-fetch even if one just finished (the shared promise is cleared
+  // on settle, so this always starts fresh work rather than joining a stale one).
+  const refresh = useCallback(() => { fetchEvents(); }, []);
 
-  return { connected, email, events, loading, refresh: load };
+  return { ...state, refresh };
 }

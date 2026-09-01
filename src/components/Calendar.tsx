@@ -1,7 +1,5 @@
 import { useMemo, useState } from 'react';
-import { SEED_DATA } from '../data/seed';
-import { useMergedCalendarEvents } from '../hooks/usePhysical';
-import { useGoogleCalendar } from '../hooks/useGoogleCalendar';
+import { useWeekEvents } from '../hooks/useWeekEvents';
 import { useWidgetSize } from '../context/WidgetSizeContext';
 import { layoutDay, hourWindow, fmtHour, fmtRange, fmtDuration } from '../lib/calendarLayout';
 import type { CalendarEvent } from '../types';
@@ -376,9 +374,7 @@ export function Calendar({ page = false }: { page?: boolean }) {
   const [selectedDay, setSelectedDay] = useState(() => todayIndex());
   const [active, setActive] = useState<CalendarEvent | null>(null);
 
-  const { connected, events: googleEvents, loading } = useGoogleCalendar();
-  const baseEvents = useMemo(() => [...SEED_DATA.events, ...googleEvents], [googleEvents]);
-  const events = useMergedCalendarEvents(baseEvents);
+  const { events, connected, loading } = useWeekEvents();
 
   const size = useWidgetSize();
   const wide = page || (size?.cols ?? 1) >= 2;

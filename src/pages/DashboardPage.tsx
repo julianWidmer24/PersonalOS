@@ -1,6 +1,7 @@
 import { HeroGreeting } from '../components/HeroGreeting';
 import { KPIStripResponsive } from '../components/KPIStrip';
 import { KeyTasks } from '../components/KeyTasks';
+import { NextEvent } from '../components/NextEvent';
 import { Projects } from '../components/Projects';
 import { TaskCRM } from '../components/TaskCRM';
 import { Calendar } from '../components/Calendar';
@@ -26,6 +27,7 @@ export function DashboardPage() {
 
       <WidgetGrid>
         <Widget key="key-tasks" id="key-tasks"><KeyTasks /></Widget>
+        <Widget key="next-event" id="next-event"><NextEvent /></Widget>
         <Widget key="projects" id="projects"><Projects /></Widget>
         <Widget key="task-crm" id="task-crm"><TaskCRM /></Widget>
         <Widget key="calendar" id="calendar"><Calendar /></Widget>

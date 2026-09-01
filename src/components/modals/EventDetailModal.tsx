@@ -77,6 +77,20 @@ export function EventDetailModal({ event, allEvents, color, weekDate, onClose, o
               <span className="text-[var(--t3)]"> · {fmtDuration(event.end - event.start)}</span>
             </dd>
           </div>
+          {event.calendar && (
+            <div className="flex gap-3">
+              <dt className="w-16 shrink-0 text-[var(--t3)]">Calendar</dt>
+              <dd className="text-[var(--t1)] break-words flex items-center gap-1.5">
+                {event.calendarColor && (
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: event.calendarColor }}
+                  />
+                )}
+                {event.calendar}
+              </dd>
+            </div>
+          )}
           {event.loc && (
             <div className="flex gap-3">
               <dt className="w-16 shrink-0 text-[var(--t3)]">Where</dt>
