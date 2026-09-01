@@ -23,6 +23,8 @@ export function Habits({ variant = 'md' }: HabitsProps) {
   const { habits, toggleHabit } = useDashboard();
   const done = habits.filter(h => h.done).length;
   const compact = variant === 'sm';
+  // Headline number = the longest run currently alive across all habits.
+  const bestStreak = habits.reduce((m, h) => Math.max(m, h.streak), 0);
 
   return (
     <Card
@@ -30,9 +32,11 @@ export function Habits({ variant = 'md' }: HabitsProps) {
       kicker={`${done}/${habits.length} today`}
       dense={compact}
       action={
-        <span className="text-[11px] text-[var(--t3)] tnum">
-          <span className="text-[var(--amber)]">●</span> 22-day streak
-        </span>
+        bestStreak > 0 ? (
+          <span className="text-[11px] text-[var(--t3)] tnum">
+            <span className="text-[var(--amber)]">●</span> {bestStreak}-day best streak
+          </span>
+        ) : undefined
       }
     >
       <ul className="space-y-1">

@@ -6,11 +6,19 @@ import { supabase } from '../lib/supabase';
 // ../lib/dashboardHelpers so this file only exports components + its hook.
 
 // ── Date helpers ──────────────────────────────────────────────
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// Local-date key (YYYY-MM-DD). Deliberately not toISOString(): that converts to
+// UTC first, so an evening check-in west of UTC — or a pre-dawn one east of it —
+// lands on the neighbouring day's key and silently breaks the streak.
+function dateStr(d: Date) {
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+const todayStr = () => dateStr(new Date());
 function daysAgoStr(n: number) {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return dateStr(d);
 }
 
 // ── Tasks: Supabase ↔ frontend mappers ────────────────────────
@@ -105,6 +113,11 @@ function rowToTask(row: any): Task {
 }
 
 // ── Habits: derive done/hist/streak from completions ──────────
+// How far back completions are fetched — and therefore the longest streak that
+// can be proven. The derive loop below never counts past this, so a streak can
+// only ever be under-reported, never invented.
+const COMPLETION_WINDOW_DAYS = 400;
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function deriveHabit(habitRow: any, completionsForHabit: any[]): Habit {
   const completedDays = new Set(
@@ -119,9 +132,12 @@ function deriveHabit(habitRow: any, completionsForHabit: any[]): Habit {
     histChars.push(completedDays.has(daysAgoStr(i)) ? '1' : '0');
   }
 
-  // streak: consecutive completed days back from today
+  // streak: consecutive completed days back from today. Today counts only once
+  // it's actually checked — but an unchecked today is still in progress, so it
+  // doesn't break the run; we start counting at yesterday instead.
+  const doneToday = completedDays.has(todayStr());
   let streak = 0;
-  for (let i = 0; i < 365; i++) {
+  for (let i = doneToday ? 0 : 1; i < COMPLETION_WINDOW_DAYS; i++) {
     if (completedDays.has(daysAgoStr(i))) streak++;
     else break;
   }
@@ -132,7 +148,7 @@ function deriveHabit(habitRow: any, completionsForHabit: any[]): Habit {
     icon:   '◇',
     hist:   histChars.join(''),
     streak,
-    done:   completedDays.has(todayStr()),
+    done:   doneToday,
   };
 }
 
@@ -311,7 +327,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
 
   // ── Load habits + habit_completions + realtime ────────────
   useEffect(() => {
-    const since = daysAgoStr(30);
+    const since = daysAgoStr(COMPLETION_WINDOW_DAYS);
 
     Promise.all([
       supabase.from('habits').select('*').order('sort_order', { ascending: true }),
