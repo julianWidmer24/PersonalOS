@@ -2,24 +2,12 @@ import { useMemo, useState } from 'react';
 import { useClock } from '../lib/dashboardHelpers';
 import { useWeekEvents, eventStartDate, eventEndDate, mondayOfWeek } from '../hooks/useWeekEvents';
 import { fmtRange, fmtDuration, fmtHour } from '../lib/calendarLayout';
+import { colorForEvent } from '../lib/eventColors';
 import type { CalendarEvent } from '../types';
 import { Card } from './shared/Card';
 import { EventDetailModal } from './modals/EventDetailModal';
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-interface KindColor { dot: string; bar: string; bg: string }
-
-// Mirrors Calendar's palette so a block and its countdown read as the same event.
-const KIND_COLORS: Record<string, KindColor> = {
-  class:         { dot: '#93c5fd', bar: 'rgba(147,197,253,0.7)',  bg: 'rgba(147,197,253,0.08)' },
-  career:        { dot: '#c4b5fd', bar: 'rgba(196,181,253,0.7)',  bg: 'rgba(196,181,253,0.08)' },
-  personal:      { dot: '#f5c451', bar: 'rgba(245,196,81,0.7)',   bg: 'rgba(245,196,81,0.08)'  },
-  work:          { dot: '#6ee7b7', bar: 'rgba(110,231,183,0.7)',  bg: 'rgba(110,231,183,0.08)' },
-  workout:       { dot: '#f4a8b7', bar: 'rgba(244,168,183,0.75)', bg: 'rgba(244,168,183,0.10)' },
-  'workout-run': { dot: '#fdba74', bar: 'rgba(253,186,116,0.75)', bg: 'rgba(253,186,116,0.10)' },
-};
-const colorFor = (kind: string): KindColor => KIND_COLORS[kind] ?? KIND_COLORS.work;
 
 /**
  * Countdown as the largest two units that still matter — "2d 4h", "3h 12m",
@@ -82,7 +70,7 @@ export function NextEvent() {
       );
     }
 
-    const c = colorFor((next ?? current).e.kind);
+    const c = colorForEvent((next ?? current).e);
 
     return (
       <>
@@ -90,16 +78,16 @@ export function NextEvent() {
           <div
             onClick={() => setActive(current.e)}
             className="mb-3 flex items-center gap-2 px-2.5 py-2 rounded-md cursor-pointer transition-colors hover:brightness-125"
-            style={{ background: colorFor(current.e.kind).bg }}
+            style={{ background: colorForEvent(current.e).bg }}
           >
             <span className="relative flex w-1.5 h-1.5 shrink-0">
               <span
                 className="absolute inline-flex w-full h-full rounded-full opacity-70 animate-ping"
-                style={{ background: colorFor(current.e.kind).dot }}
+                style={{ background: colorForEvent(current.e).dot }}
               />
               <span
                 className="relative inline-flex w-1.5 h-1.5 rounded-full"
-                style={{ background: colorFor(current.e.kind).dot }}
+                style={{ background: colorForEvent(current.e).dot }}
               />
             </span>
             <span className="text-[11.5px] text-[var(--t1)] truncate flex-1">{current.e.title}</span>
@@ -156,7 +144,7 @@ export function NextEvent() {
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full shrink-0"
-                  style={{ background: colorFor(e.kind).dot }}
+                  style={{ background: colorForEvent(e).dot }}
                 />
                 <span className="text-[11.5px] text-[var(--t2)] group-hover:text-[var(--t1)] truncate flex-1 transition-colors">
                   {e.title}
@@ -183,7 +171,7 @@ export function NextEvent() {
         <EventDetailModal
           event={active}
           allEvents={events}
-          color={colorFor(active.kind)}
+          color={colorForEvent(active)}
           weekDate={new Date(weekMonday.getTime() + active.day * 86400_000)}
           onClose={() => setActive(null)}
           onViewDay={() => setActive(null)}

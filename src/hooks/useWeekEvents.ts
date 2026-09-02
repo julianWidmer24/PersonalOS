@@ -1,19 +1,37 @@
 import { useMemo } from 'react';
 import { SEED_DATA } from '../data/seed';
 import { useGoogleCalendar } from './useGoogleCalendar';
+import { useHiddenCalendars } from './useCalendarVisibility';
 import { useMergedCalendarEvents } from './usePhysical';
-import type { CalendarEvent } from '../types';
+import type { CalendarEvent, GoogleCalendarMeta } from '../types';
+
+export interface WeekEvents {
+  events: CalendarEvent[];
+  /** every calendar in the account, including the ones filtered out below */
+  calendars: GoogleCalendarMeta[];
+  connected: boolean;
+  loading: boolean;
+}
 
 /**
  * The current week's events exactly as the Calendar grid shows them: seeded
- * events + every Google calendar, with the workout routine layered on top.
- * Single source of truth so the grid and the next-up widget can't disagree.
+ * events + the Google calendars the user has left ticked, with the workout
+ * routine layered on top. Single source of truth so the grid, the agenda and
+ * the next-up widget can't disagree about what's showing.
  */
-export function useWeekEvents(): { events: CalendarEvent[]; connected: boolean; loading: boolean } {
-  const { connected, events: googleEvents, loading } = useGoogleCalendar();
-  const baseEvents = useMemo(() => [...SEED_DATA.events, ...googleEvents], [googleEvents]);
+export function useWeekEvents(): WeekEvents {
+  const { connected, events: googleEvents, calendars, loading } = useGoogleCalendar();
+  const hidden = useHiddenCalendars();
+
+  const baseEvents = useMemo(
+    // Locally-derived events (seed, workouts) belong to no Google calendar, so
+    // the picker never hides them.
+    () => [...SEED_DATA.events, ...googleEvents.filter((e) => !e.calendar || !hidden.has(e.calendar))],
+    [googleEvents, hidden],
+  );
+
   const events = useMergedCalendarEvents(baseEvents);
-  return { events, connected, loading };
+  return { events, calendars, connected, loading };
 }
 
 /** Monday-start index of a date (0 = Mon … 6 = Sun). */

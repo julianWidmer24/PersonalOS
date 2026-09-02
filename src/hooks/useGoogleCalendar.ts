@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import { supabase } from '../lib/supabase';
-import type { CalendarEvent } from '../types';
+import type { CalendarEvent, GoogleCalendarMeta } from '../types';
 
 // Monday (local) of the current week as YYYY-MM-DD.
 function currentMondayStr(d = new Date()): string {
@@ -17,6 +17,8 @@ export interface GoogleCalendarState {
   connected: boolean;
   email: string | null;
   events: CalendarEvent[];
+  /** every calendar in the account, whether or not it's currently shown */
+  calendars: GoogleCalendarMeta[];
   loading: boolean;
   refresh: () => void;
 }
@@ -27,7 +29,8 @@ type Snapshot = Omit<GoogleCalendarState, 'refresh'>;
 // (the grid, the next-up countdown), and each mounting its own copy of this
 // hook would fire a duplicate edge-function call on every page load.
 const EMPTY: CalendarEvent[] = [];
-let snapshot: Snapshot = { connected: false, email: null, events: EMPTY, loading: true };
+const NO_CALENDARS: GoogleCalendarMeta[] = [];
+let snapshot: Snapshot = { connected: false, email: null, events: EMPTY, calendars: NO_CALENDARS, loading: true };
 let inflight: Promise<void> | null = null;
 const subscribers = new Set<() => void>();
 
@@ -42,13 +45,14 @@ function fetchEvents(): Promise<void> {
     .invoke('google-calendar', { body: { weekStart: currentMondayStr() } })
     .then(({ data, error }) => {
       if (error || !data || data.error) {
-        setSnapshot({ connected: false, email: null, events: EMPTY, loading: false });
+        setSnapshot({ connected: false, email: null, events: EMPTY, calendars: NO_CALENDARS, loading: false });
         return;
       }
       setSnapshot({
         connected: !!data.connected,
         email: data.email ?? null,
         events: Array.isArray(data.events) ? (data.events as CalendarEvent[]) : EMPTY,
+        calendars: Array.isArray(data.calendars) ? (data.calendars as GoogleCalendarMeta[]) : NO_CALENDARS,
         loading: false,
       });
     })

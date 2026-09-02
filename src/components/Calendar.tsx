@@ -1,26 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useWeekEvents } from '../hooks/useWeekEvents';
+import { useHiddenCalendars, setCalendarsHidden, toggleCalendar } from '../hooks/useCalendarVisibility';
 import { useWidgetSize } from '../context/WidgetSizeContext';
 import { layoutDay, hourWindow, fmtHour, fmtRange, fmtDuration } from '../lib/calendarLayout';
-import type { CalendarEvent } from '../types';
+import { colorForCalendar, colorForEvent } from '../lib/eventColors';
+import type { CalendarEvent, GoogleCalendarMeta } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
 import { EventDetailModal } from './modals/EventDetailModal';
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-interface KindColor { dot: string; bar: string; bg: string; bgSolid: string }
-
-const KIND_COLORS: Record<string, KindColor> = {
-  class:          { dot: '#93c5fd', bar: 'rgba(147,197,253,0.7)',  bg: 'rgba(147,197,253,0.08)', bgSolid: 'rgba(147,197,253,0.17)' },
-  career:         { dot: '#c4b5fd', bar: 'rgba(196,181,253,0.7)',  bg: 'rgba(196,181,253,0.08)', bgSolid: 'rgba(196,181,253,0.17)' },
-  personal:       { dot: '#f5c451', bar: 'rgba(245,196,81,0.7)',   bg: 'rgba(245,196,81,0.08)',  bgSolid: 'rgba(245,196,81,0.17)'  },
-  work:           { dot: '#6ee7b7', bar: 'rgba(110,231,183,0.7)',  bg: 'rgba(110,231,183,0.08)', bgSolid: 'rgba(110,231,183,0.17)' },
-  workout:        { dot: '#f4a8b7', bar: 'rgba(244,168,183,0.75)', bg: 'rgba(244,168,183,0.10)', bgSolid: 'rgba(244,168,183,0.19)' },
-  'workout-run':  { dot: '#fdba74', bar: 'rgba(253,186,116,0.75)', bg: 'rgba(253,186,116,0.10)', bgSolid: 'rgba(253,186,116,0.19)' },
-};
-
-const colorFor = (kind: string): KindColor => KIND_COLORS[kind] ?? KIND_COLORS.work;
 
 // Monday-start index of today (0 = Mon … 6 = Sun)
 function todayIndex(d = new Date()) {
@@ -145,7 +134,7 @@ function CalendarWeek({ events, startH, endH, hourPx, wide, sticky, selectedId, 
             {byDay[day].map(({ event: e, left, width, clusterSize, z }) => {
               const top = (e.start - startH) * hourPx;
               const h = Math.max((e.end - e.start) * hourPx, 13);
-              const c = colorFor(e.kind);
+              const c = colorForEvent(e);
               const crowded = clusterSize > 1;
               return (
                 <button
@@ -255,7 +244,7 @@ function CalendarDay({ events, dayIdx, onPickDay, onSelect, selectedId, showPick
       ) : (
         <ul className="space-y-0.5">
           {list.map(e => {
-            const c = colorFor(e.kind);
+            const c = colorForEvent(e);
             return (
               <li key={e.id}>
                 <button
@@ -337,7 +326,7 @@ function CalendarMonth({
               {wide ? (
                 <div className="mt-0.5 space-y-[2px]">
                   {dayEvents.slice(0, 3).map(e => {
-                    const c = colorFor(e.kind);
+                    const c = colorForEvent(e);
                     return (
                       <div
                         key={e.id}
@@ -355,7 +344,7 @@ function CalendarMonth({
               ) : (
                 <div className="flex gap-0.5 mt-1">
                   {dayEvents.slice(0, 3).map(e => (
-                    <span key={e.id} className="w-1 h-1 rounded-full" style={{ background: colorFor(e.kind).dot }} />
+                    <span key={e.id} className="w-1 h-1 rounded-full" style={{ background: colorForEvent(e).dot }} />
                   ))}
                 </div>
               )}
@@ -367,6 +356,111 @@ function CalendarMonth({
   );
 }
 
+/* ---------------------------------------------------------- calendar picker */
+
+/**
+ * Tick-list of the account's Google calendars, mirroring the sidebar in Google
+ * Calendar itself. Choices are device-local (localStorage) and apply to every
+ * calendar surface at once, since they're read from the shared visibility store.
+ */
+function CalendarPicker({ calendars, wide }: { calendars: GoogleCalendarMeta[]; wide: boolean }) {
+  const [open, setOpen] = useState(false);
+  const hidden = useHiddenCalendars();
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (ev: MouseEvent) => {
+      if (!ref.current?.contains(ev.target as Node)) setOpen(false);
+    };
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') setOpen(false); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const names = calendars.map(c => c.name);
+  const hiddenCount = names.filter(n => hidden.has(n)).length;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={hiddenCount > 0 ? `${hiddenCount} calendar${hiddenCount === 1 ? '' : 's'} hidden` : 'Choose calendars'}
+        className={`flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded-md border transition-colors ${
+          open || hiddenCount > 0
+            ? 'border-[var(--line-hi)] text-[var(--t1)] bg-[var(--bg-card-hi)]'
+            : 'border-[var(--line)] text-[var(--t3)] hover:text-[var(--t1)] hover:border-[var(--line-hi)]'
+        }`}
+      >
+        <span className="flex items-center -space-x-[3px]">
+          {calendars.slice(0, 3).map(c => (
+            <span
+              key={c.name}
+              className="w-1.5 h-1.5 rounded-full ring-1 ring-[var(--bg-card)]"
+              style={{ background: hidden.has(c.name) ? 'var(--t4)' : colorForCalendar(c.color) }}
+            />
+          ))}
+        </span>
+        {wide && <span>Calendars</span>}
+        {hiddenCount > 0 && <span className="tnum text-[var(--t3)]">{names.length - hiddenCount}/{names.length}</span>}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-8 w-56 rounded-xl border border-[var(--line)] bg-[var(--bg-card)] shadow-xl z-50 py-1">
+          <div className="max-h-64 overflow-y-auto pos-scroll">
+            {calendars.map(c => {
+              const on = !hidden.has(c.name);
+              const dot = colorForCalendar(c.color);
+              return (
+                <button
+                  key={c.name}
+                  onClick={() => toggleCalendar(c.name)}
+                  className="w-full flex items-center gap-2 px-3 py-1.5 text-left hover:bg-[var(--bg-elev)] transition-colors"
+                >
+                  <span
+                    className="w-3 h-3 rounded-[3px] shrink-0 grid place-items-center border transition-colors"
+                    style={{
+                      background: on ? dot : 'transparent',
+                      borderColor: on ? dot : 'var(--line-hi)',
+                    }}
+                  >
+                    {on && (
+                      <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                        <path d="M1.5 4.2L3 5.7L6.5 2.2" stroke="var(--bg)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    )}
+                  </span>
+                  <span className={`text-[12px] truncate ${on ? 'text-[var(--t2)]' : 'text-[var(--t4)]'}`}>
+                    {c.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="mt-1 pt-1 border-t border-[var(--line)]/60 flex items-center justify-between px-2">
+            <button
+              onClick={() => setCalendarsHidden(names, false)}
+              className="text-[11px] px-1.5 py-0.5 rounded text-[var(--t3)] hover:text-[var(--t1)] transition-colors"
+            >
+              Show all
+            </button>
+            <button
+              onClick={() => setCalendarsHidden(names, true)}
+              className="text-[11px] px-1.5 py-0.5 rounded text-[var(--t3)] hover:text-[var(--t1)] transition-colors"
+            >
+              Hide all
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ root */
 
 export function Calendar({ page = false }: { page?: boolean }) {
@@ -374,7 +468,7 @@ export function Calendar({ page = false }: { page?: boolean }) {
   const [selectedDay, setSelectedDay] = useState(() => todayIndex());
   const [active, setActive] = useState<CalendarEvent | null>(null);
 
-  const { events, connected, loading } = useWeekEvents();
+  const { events, calendars, connected, loading } = useWeekEvents();
 
   const size = useWidgetSize();
   const wide = page || (size?.cols ?? 1) >= 2;
@@ -417,6 +511,7 @@ export function Calendar({ page = false }: { page?: boolean }) {
   const action = (
     <div className="flex items-center gap-2">
       {gcalBadge}
+      {connected && calendars.length > 0 && <CalendarPicker calendars={calendars} wide={wide} />}
       {wide && (view !== 'Week' || selectedDay !== todayIndex()) && (
         <button
           onClick={() => { setSelectedDay(todayIndex()); setView('Week'); }}
@@ -461,7 +556,7 @@ export function Calendar({ page = false }: { page?: boolean }) {
     <EventDetailModal
       event={active}
       allEvents={events}
-      color={colorFor(active.kind)}
+      color={colorForEvent(active)}
       weekDate={dates[active.day]}
       onClose={() => setActive(null)}
       onViewDay={openDay}

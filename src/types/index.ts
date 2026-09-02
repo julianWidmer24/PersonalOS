@@ -51,6 +51,13 @@ export interface CalendarEvent {
   _derived?: boolean;
 }
 
+/** One calendar in the connected Google account, as the picker lists it. */
+export interface GoogleCalendarMeta {
+  name: string;
+  /** Google's hex colour for the calendar; '' when it reports none. */
+  color: string;
+}
+
 export interface Goal {
   id: string;
   title: string;
