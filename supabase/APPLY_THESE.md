@@ -85,6 +85,20 @@ After running, test:
 3. Open the app in a second browser/device → the same plans load.
 4. Hit **Reset** on a plan → it returns to the seeded version and syncs.
 
+## 6. `011_dashboard_mantra.sql` — apply to sync the dashboard quote ✅
+Creates `dashboard_mantra`: one row per user holding `{ text, author }` for the
+quote pinned above the greeting.
+
+Same offline-first fallback as 006: before you run it the quote lives in that
+browser's localStorage and the remote calls silently no-op; after you run it the
+same quote follows you across devices.
+
+After running, test:
+1. Click the quote on the dashboard, type something, hit **Save** →
+   `dashboard_mantra` has one row for you with your text in `data`.
+2. Reload → the quote is still there.
+3. Open the app in a second browser/device → the same quote loads.
+
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
   keep device-local.

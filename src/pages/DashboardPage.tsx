@@ -1,4 +1,5 @@
 import { HeroGreeting } from '../components/HeroGreeting';
+import { Mantra } from '../components/Mantra';
 import { KPIStripResponsive } from '../components/KPIStrip';
 import { KeyTasks } from '../components/KeyTasks';
 import { NextEvent } from '../components/NextEvent';
@@ -17,8 +18,15 @@ import { WidgetGrid, Widget } from '../components/shared/WidgetGrid';
 export function DashboardPage() {
   return (
     <main className="max-w-[1600px] mx-auto px-4 md:px-6 py-5 md:py-6">
-      <section className="mb-4 md:mb-5">
-        <HeroGreeting variant="lg" />
+      {/* Greeting anchors the left; the quote fills the space beside it and
+          sets its own type size to match how much there is to read. */}
+      <section className="mb-4 md:mb-5 flex flex-col md:flex-row md:items-center gap-4 md:gap-10">
+        <div className="shrink-0">
+          <HeroGreeting variant="lg" />
+        </div>
+        <div className="md:flex-1 md:min-w-0 md:flex md:justify-end">
+          <Mantra />
+        </div>
       </section>
 
       <section className="mb-4 md:mb-5">
