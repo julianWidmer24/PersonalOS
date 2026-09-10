@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useClock } from '../lib/dashboardHelpers';
+import { useClock, fmtSpan } from '../lib/dashboardHelpers';
 import { useWeekEvents, eventStartDate, eventEndDate, mondayOfWeek } from '../hooks/useWeekEvents';
 import { fmtRange, fmtDuration, fmtHour } from '../lib/calendarLayout';
 import { colorForEvent } from '../lib/eventColors';
@@ -8,23 +8,6 @@ import { Card } from './shared/Card';
 import { EventDetailModal } from './modals/EventDetailModal';
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-/**
- * Countdown as the largest two units that still matter — "2d 4h", "3h 12m",
- * "12m 30s", "45s". Seconds only appear under an hour, so the widget isn't
- * visibly repainting a digit that's three days away from mattering.
- */
-function fmtCountdown(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const d = Math.floor(total / 86400);
-  const h = Math.floor((total % 86400) / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  if (d > 0) return `${d}d ${h}h`;
-  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
-  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
-  return `${s}s`;
-}
 
 /** "today" / "tomorrow" / "Thu" — the day label above the countdown. */
 function dayLabel(e: CalendarEvent, now: Date): string {
@@ -92,7 +75,7 @@ export function NextEvent() {
             </span>
             <span className="text-[11.5px] text-[var(--t1)] truncate flex-1">{current.e.title}</span>
             <span className="text-[10.5px] tnum text-[var(--t3)] shrink-0">
-              {fmtCountdown(current.end.getTime() - now.getTime())} left
+              {fmtSpan(current.end.getTime() - now.getTime())} left
             </span>
           </div>
         )}
@@ -106,7 +89,7 @@ export function NextEvent() {
               className="mt-0.5 text-[30px] leading-none tnum font-medium tabular-nums"
               style={{ color: c.dot }}
             >
-              {fmtCountdown(next.start.getTime() - now.getTime())}
+              {fmtSpan(next.start.getTime() - now.getTime())}
             </div>
 
             <div className="mt-2.5 flex items-start gap-2">

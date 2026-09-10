@@ -54,10 +54,26 @@ function persistOrder(order: string[]) {
   try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch { /* ignore */ }
 }
 
-/** Saved order, minus widgets that no longer exist, plus new ones at the end. */
+/**
+ * Saved order, minus widgets that no longer exist, plus new ones. A widget the
+ * saved order predates slots in beside its nearest authored neighbour rather
+ * than at the bottom of the dashboard — otherwise every new card lands below
+ * the fold for anyone who has ever rearranged theirs.
+ */
 function mergeOrder(saved: string[], ids: string[]): string[] {
-  const present = saved.filter(id => ids.includes(id));
-  return [...present, ...ids.filter(id => !present.includes(id))];
+  const next = saved.filter(id => ids.includes(id));
+  ids.forEach((id, i) => {
+    if (next.includes(id)) return;
+    // Everything authored before `id` is already placed, so the last one we
+    // find going backwards is the neighbour to sit after.
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = next.indexOf(ids[j]);
+      if (prev !== -1) { at = prev + 1; break; }
+    }
+    next.splice(at, 0, id);
+  });
+  return next;
 }
 
 function arrayMove<T>(arr: T[], from: number, to: number): T[] {
@@ -192,7 +208,10 @@ export function WidgetGrid({ children, className = '' }: { children: React.React
             width: r.width,
             height: r.height,
           };
-        });
+        })
+        // Hidden tiles (a widget with nothing to show) measure as zero-size
+        // rects at the document origin — never a real drop target.
+        .filter(b => b.width > 0 && b.height > 0);
 
       const sourceIdx = boxes.findIndex(b => b.id === id);
       if (sourceIdx === -1) return;
@@ -301,6 +320,7 @@ export function Widget({ id, children, defaultCols = 1 }: WidgetProps) {
   const [autoHeight, setAutoHeight] = useState(0);
   const [width, setWidth] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [empty, setEmpty] = useState(false);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -319,6 +339,21 @@ export function Widget({ id, children, defaultCols = 1 }: WidgetProps) {
     return () => ro.disconnect();
   }, []);
 
+  // A card that renders nothing right now — "Key tasks" with none starred,
+  // "In progress" with nothing running — shouldn't hold a slot and leave a gap
+  // in the grid. Emptiness is read off the DOM child count, not a measured
+  // height: a hidden tile measures 0 whatever it contains, so height would
+  // latch it shut and it could never come back.
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    const check = () => setEmpty(el.childNodes.length === 0);
+    check();
+    const mo = new MutationObserver(check);
+    mo.observe(el, { childList: true });
+    return () => mo.disconnect();
+  }, []);
+
   useLayoutEffect(() => {
     const el = outerRef.current;
     if (!el) return;
@@ -328,6 +363,18 @@ export function Widget({ id, children, defaultCols = 1 }: WidgetProps) {
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // A ResizeObserver skips an element that isn't being rendered and doesn't
+  // report when one comes back, so a tile returning from hidden would keep the
+  // 0 it was last measured at and span a single 8px row on top of its
+  // neighbour. Re-measure by hand on the way back in.
+  useLayoutEffect(() => {
+    if (empty) return;
+    const content = contentRef.current;
+    const outer = outerRef.current;
+    if (content) setAutoHeight(content.getBoundingClientRect().height);
+    if (outer) setWidth(outer.getBoundingClientRect().width);
+  }, [empty]);
 
   const effHeight = height ?? autoHeight;
   const rowSpan = Math.max(1, Math.ceil((effHeight + GAP_PX) / (ROW_PX + GAP_PX)));
@@ -424,7 +471,11 @@ export function Widget({ id, children, defaultCols = 1 }: WidgetProps) {
       className={`pos-widget group/widget relative ${dragging ? 'pos-widget-dragging' : ''} ${
         isMoving ? 'pos-widget-ghost' : ''
       }`}
-      style={{ gridColumn: `span ${effCols}`, gridRow: `span ${rowSpan}` }}
+      style={{
+        gridColumn: `span ${effCols}`,
+        gridRow: `span ${rowSpan}`,
+        display: empty ? 'none' : undefined,
+      }}
     >
       <div ref={contentRef} style={height !== null ? { height } : undefined}>
         <WidgetSizeContext.Provider value={size}>{children}</WidgetSizeContext.Provider>

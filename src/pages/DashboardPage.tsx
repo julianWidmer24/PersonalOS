@@ -2,6 +2,7 @@ import { HeroGreeting } from '../components/HeroGreeting';
 import { Mantra } from '../components/Mantra';
 import { KPIStripResponsive } from '../components/KPIStrip';
 import { KeyTasks } from '../components/KeyTasks';
+import { InProgress } from '../components/InProgress';
 import { NextEvent } from '../components/NextEvent';
 import { Projects } from '../components/Projects';
 import { TaskCRM } from '../components/TaskCRM';
@@ -34,6 +35,7 @@ export function DashboardPage() {
       </section>
 
       <WidgetGrid>
+        <Widget key="in-progress" id="in-progress"><InProgress /></Widget>
         <Widget key="key-tasks" id="key-tasks"><KeyTasks /></Widget>
         <Widget key="next-event" id="next-event"><NextEvent /></Widget>
         <Widget key="projects" id="projects"><Projects /></Widget>

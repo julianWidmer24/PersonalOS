@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { TAG_COLORS, PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
+import { TAG_COLORS, PRIORITY_COLORS, fmtDue, fmtSpan, useClock } from '../lib/dashboardHelpers';
 import type { Task, Project } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
@@ -24,6 +24,43 @@ function StarBtn({ starred, onStar }: { starred: boolean; onStar: () => void }) 
         />
       </svg>
     </button>
+  );
+}
+
+/**
+ * Start/stop the task's stopwatch. Unlike its neighbours this stays visible
+ * once a task is running — a ticking clock you can't see is a clock you forget
+ * to stop.
+ */
+function ProgressBtn({ running, onToggle }: { running: boolean; onToggle: () => void }) {
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); onToggle(); }}
+      title={running ? 'Stop working on this' : 'Mark in progress'}
+      className={`transition-opacity shrink-0 hover:scale-110 ${
+        running ? 'text-[var(--green)]' : 'opacity-0 group-hover:opacity-100 text-[var(--t3)] hover:text-[var(--t1)]'
+      }`}
+    >
+      {running ? (
+        <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="7" height="7" rx="1.5" fill="currentColor" />
+        </svg>
+      ) : (
+        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+          <path d="M3.6 2.4l5.4 3.6-5.4 3.6V2.4z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
+/** Live "12m 30s" readout, isolated so only this node repaints each second. */
+function Elapsed({ startedAt }: { startedAt: string }) {
+  const now = useClock();
+  return (
+    <span className="text-[10px] tnum shrink-0" style={{ color: 'var(--green)' }}>
+      {fmtSpan(now.getTime() - Date.parse(startedAt))}
+    </span>
   );
 }
 
@@ -99,6 +136,7 @@ interface TaskRowProps {
   onStar?: (id: string) => void;
   onDelete?: (id: string) => void;
   onEdit?: (id: string) => void;
+  onProgress?: (id: string) => void;
   onDragStart?: (id: string) => void;
   onDragOver?: (id: string) => void;
   onDrop?: (id: string) => void;
@@ -106,9 +144,10 @@ interface TaskRowProps {
   project?: Project | null;
 }
 
-function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
+function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onProgress, onDragStart, onDragOver, onDrop, compact, project }: TaskRowProps) {
   const tagColor = TAG_COLORS[t.tag] || {};
   const isDone = t.status === 'done';
+  const running = !!t.startedAt && !isDone;
   return (
     <li
       draggable
@@ -148,12 +187,16 @@ function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onDragStart, onDragOve
               </span>
             )}
             <span className="text-[10.5px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
-            <span className="text-[10.5px] text-[var(--t4)] tnum ml-auto">{t.est}</span>
+            <span className="ml-auto flex items-center gap-1.5">
+              {running && <Elapsed startedAt={t.startedAt!} />}
+              <span className="text-[10.5px] text-[var(--t4)] tnum">{t.est}</span>
+            </span>
           </div>
         )}
       </div>
-      {(onStar || onDelete || onEdit) && (
+      {(onStar || onDelete || onEdit || onProgress) && (
         <div className="mt-0.5 flex items-center gap-2">
+          {onProgress && !isDone && <ProgressBtn running={running} onToggle={() => onProgress(t.id)} />}
           {onEdit && <EditBtn onEdit={() => onEdit(t.id)} />}
           {onStar && <StarBtn starred={!!t.isStarred} onStar={() => onStar(t.id)} />}
           {onDelete && <DeleteBtn onDelete={() => onDelete(t.id)} />}
@@ -164,7 +207,7 @@ function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onDragStart, onDragOve
 }
 
 export function TaskCRM() {
-  const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, updateTask, setModal } = useDashboard();
+  const { tasks, projects, toggleTask, starTask, removeTask, reorderTasks, updateTask, setModal, toggleTaskProgress } = useDashboard();
   const [dragId, setDragId] = useState<string | null>(null);
   const [view, setView] = useState('Pipeline');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed);
@@ -262,12 +305,18 @@ export function TaskCRM() {
                     <ul className="grid grid-cols-1 gap-1.5">
                       {colTasks.map(t => {
                         const p = t.projectId ? projById[t.projectId] : null;
+                        const running = !!t.startedAt && col.id !== 'done';
                         return (
                           <li
                             key={t.id}
                             draggable
                             onDragStart={() => onDragStart(t.id)}
-                            className="group p-2 rounded-md bg-[var(--bg-card)] border border-[var(--line)] hover:border-[var(--line-hi)] transition-colors"
+                            className={`group p-2 rounded-md bg-[var(--bg-card)] border transition-colors ${
+                              running ? '' : 'border-[var(--line)] hover:border-[var(--line-hi)]'
+                            }`}
+                            style={running
+                              ? { borderColor: 'var(--green)', background: 'rgba(110,231,183,.05)' }
+                              : undefined}
                           >
                             <div className="flex items-start gap-2">
                               <button
@@ -299,7 +348,11 @@ export function TaskCRM() {
                                     </span>
                                   )}
                                   <span className="text-[10px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
+                                  {running && <Elapsed startedAt={t.startedAt!} />}
                                   <span className="ml-auto flex items-center gap-2">
+                                    {col.id !== 'done' && (
+                                      <ProgressBtn running={running} onToggle={() => toggleTaskProgress(t.id)} />
+                                    )}
                                     <EditBtn onEdit={() => openTask(t.id)} />
                                     <StarBtn starred={!!t.isStarred} onStar={() => starTask(t.id)} />
                                     <DeleteBtn onDelete={() => removeTask(t.id)} />
@@ -322,6 +375,7 @@ export function TaskCRM() {
           {tasks.map(t => (
             <TaskRow
               key={t.id} t={t} onToggle={toggleTask} onStar={starTask} onDelete={removeTask} onEdit={openTask}
+              onProgress={toggleTaskProgress}
               project={t.projectId ? projById[t.projectId] : null}
               onDragStart={onDragStart} onDrop={onDrop} onDragOver={() => {}}
               compact={false}

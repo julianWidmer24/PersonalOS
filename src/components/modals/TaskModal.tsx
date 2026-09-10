@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useDashboard } from '../../context/DashboardContext';
+import { useClock, fmtSpan } from '../../lib/dashboardHelpers';
 import type { Task } from '../../types';
 import { ModalShell } from '../shared/ModalShell';
 
@@ -10,6 +11,12 @@ const STATUSES = ['now', 'next', 'later', 'done'] as const;
 // 'Today', which the date input can't represent — show those as empty.
 const asDateValue = (due?: string) => (due && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : '');
 
+/** Ticks on its own so typing in the form doesn't repaint once a second. */
+function Elapsed({ startedAt }: { startedAt: string }) {
+  const now = useClock();
+  return <span className="tnum">{fmtSpan(now.getTime() - Date.parse(startedAt))}</span>;
+}
+
 function TaskForm({ task }: { task: Task | null }) {
   const { setModal, addTask, updateTask, removeTask, projects } = useDashboard();
   const [title, setTitle] = useState(task?.title ?? '');
@@ -18,6 +25,9 @@ function TaskForm({ task }: { task: Task | null }) {
   const [status, setStatus] = useState<Task['status']>(task?.status ?? 'now');
   const [due, setDue] = useState(asDateValue(task?.due));
   const [projectId, setProjectId] = useState(task?.projectId ?? '');
+  // Held rather than applied immediately, like every other field here — the
+  // stopwatch starts from the moment you flip the switch, not from Save.
+  const [startedAt, setStartedAt] = useState<string | null>(task?.startedAt ?? null);
 
   const close = () => setModal(null);
   const save = () => {
@@ -29,6 +39,8 @@ function TaskForm({ task }: { task: Task | null }) {
       status,
       due: due || '—',
       projectId: projectId || null,
+      // A finished task is never in progress, whichever control set it done.
+      startedAt: status === 'done' ? null : startedAt,
     };
     if (task) updateTask(task.id, fields);
     else addTask({ ...fields, est: '—' });
@@ -96,6 +108,29 @@ function TaskForm({ task }: { task: Task | null }) {
             </select>
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setStartedAt(startedAt ? null : new Date().toISOString())}
+          disabled={status === 'done'}
+          className={`mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-md border text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+            startedAt && status !== 'done'
+              ? 'border-[var(--green)] bg-[rgba(110,231,183,.06)]'
+              : 'border-[var(--line)] hover:border-[var(--line-hi)]'
+          }`}
+        >
+          <span
+            className="w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ background: startedAt && status !== 'done' ? 'var(--green)' : 'var(--t4)' }}
+          />
+          <span className="text-[12px] text-[var(--t1)] flex-1">In progress</span>
+          <span className="text-[10.5px] text-[var(--t3)]">
+            {status === 'done'
+              ? 'finished'
+              : startedAt
+                ? <>running · <Elapsed startedAt={startedAt} /></>
+                : 'start the stopwatch'}
+          </span>
+        </button>
         <div className="mt-5 flex items-center justify-end gap-2">
           {task && (
             <button onClick={del} className="mr-auto px-3 py-1.5 text-[12px] text-[var(--t3)] hover:text-[var(--red,#ef4444)] rounded-md">Delete</button>

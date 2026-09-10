@@ -58,6 +58,25 @@ export function fmtDue(due?: string): string {
   return new Date(y, m - 1, d).toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
+// ── Durations ─────────────────────────────────────────────────
+/**
+ * A span of milliseconds as the two largest units that still matter —
+ * "45s", "12m 30s", "3h 12m", "2d 4h". The smallest unit leads and is dropped
+ * as soon as a bigger one takes over, so a stopwatch reads in seconds, grows
+ * into minutes, then hours, and never repaints a digit nobody is watching.
+ */
+export function fmtSpan(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m > 0) return `${m}m ${String(s).padStart(2, '0')}s`;
+  return `${s}s`;
+}
+
 // ── Color maps ────────────────────────────────────────────────
 export const TAG_COLORS: Record<string, { fg: string; bg: string }> = {
   course:   { fg: '#a8c5ff', bg: 'rgba(147,197,253,.10)' },

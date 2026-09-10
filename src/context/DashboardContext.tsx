@@ -82,13 +82,19 @@ async function purgeExpiredDoneTasks() {
   if (error) console.error('purge expired done tasks error:', error);
 }
 
-// The live DB may predate migration 008 — retry without completed_at so a
-// status change still persists on a database that lacks the column.
+// Columns added by a migration the live DB may not have run yet (008, 012).
+// A patch touching one is retried without it, so the rest of the change still
+// persists — the task just doesn't age out / keep its stopwatch across devices.
+const OPTIONAL_TASK_COLUMNS = ['completed_at', 'started_at'];
+
 async function patchTaskRow(id: string, patch: Record<string, unknown>) {
   let { error } = await supabase.from('tasks').update(patch).eq('id', id);
-  if (error && 'completed_at' in patch) {
+  const optional = OPTIONAL_TASK_COLUMNS.filter(c => c in patch);
+  if (error && optional.length) {
     const fallback = { ...patch };
-    delete fallback.completed_at;
+    optional.forEach(c => delete fallback[c]);
+    // Nothing but optional columns to write — the retry would be a no-op.
+    if (!Object.keys(fallback).length) return error;
     ({ error } = await supabase.from('tasks').update(fallback).eq('id', id));
   }
   return error;
@@ -109,6 +115,7 @@ function rowToTask(row: any): Task {
     est:       '—',
     projectId: row.project_id ?? null,
     isStarred: row.starred ?? false,
+    startedAt: row.started_at ? String(row.started_at) : null,
   };
 }
 
@@ -219,6 +226,8 @@ interface DashboardApi {
 
   toggleTask: (id: string) => void;
   starTask: (id: string) => void;
+  /** Mark a task in progress (starting its stopwatch) or stop it again. */
+  toggleTaskProgress: (id: string) => void;
   toggleHabit: (id: string) => void;
   reorderTasks: (next: Task[]) => void;
   addTask: (data: Partial<Task>) => void;
@@ -477,12 +486,14 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     setTasks(ts => ts.map(t => {
       if (t.id !== id) return t;
       const newStatus = t.status === 'done' ? 'now' : 'done';
-      // Stamp/clear the expiry clock alongside the status change.
+      // Stamp/clear the expiry clock alongside the status change. Finishing a
+      // task also stops its stopwatch — it's no longer in progress.
       patchTaskRow(id, {
         status: STATUS_TO_DB[newStatus] ?? newStatus,
         completed_at: newStatus === 'done' ? new Date().toISOString() : null,
+        started_at: null,
       }).then(error => { if (error) console.error('toggleTask error:', error); });
-      return { ...t, status: newStatus };
+      return { ...t, status: newStatus, startedAt: null };
     }));
   }, []);
 
@@ -494,6 +505,19 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
         if (error) console.error('starTask error:', error);
       });
       return { ...t, isStarred: next };
+    }));
+  }, []);
+
+  // Starting a task stamps the moment it began; the stopwatch counts from that
+  // timestamp rather than from a local tick, so it survives reloads and reads
+  // the same on every device. Stopping clears it — pausing isn't a thing yet.
+  const toggleTaskProgress = useCallback((id: string) => {
+    setTasks(ts => ts.map(t => {
+      if (t.id !== id) return t;
+      const next = t.startedAt ? null : new Date().toISOString();
+      patchTaskRow(id, { started_at: next })
+        .then(error => { if (error) console.error('toggleTaskProgress error:', error); });
+      return { ...t, startedAt: next };
     }));
   }, []);
 
@@ -535,7 +559,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const updateTask = useCallback((id: string, patch: Partial<Task>) => {
+  const updateTask = useCallback((id: string, raw: Partial<Task>) => {
+    // Moving a task to done stops its stopwatch, however it got there — unless
+    // the caller is setting startedAt itself.
+    const patch: Partial<Task> =
+      raw.status === 'done' && raw.startedAt === undefined ? { ...raw, startedAt: null } : raw;
     setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
     const dbPatch: Record<string, unknown> = {};
     if (patch.title     !== undefined) dbPatch.title    = patch.title;
@@ -548,6 +576,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     if (patch.isStarred !== undefined) dbPatch.starred  = patch.isStarred;
     if (patch.due       !== undefined) dbPatch.due_date = toDueDate(patch.due);
     if (patch.projectId !== undefined) dbPatch.project_id = patch.projectId;
+    if (patch.startedAt !== undefined) dbPatch.started_at = patch.startedAt;
     if (Object.keys(dbPatch).length) {
       patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
         .then(error => { if (error) console.error('updateTask error:', error); });
@@ -820,7 +849,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const api: DashboardApi = {
     tasks, setTasks, habits, setHabits, journal, setJournal,
     projects, setProjects, goals, modal, setModal,
-    toggleTask, starTask, toggleHabit, reorderTasks,
+    toggleTask, starTask, toggleTaskProgress, toggleHabit, reorderTasks,
     addTask, updateTask, removeTask, addJournal,
     addHabit, updateHabit, removeHabit,
     addProject, updateProject, removeProject, assignTask,

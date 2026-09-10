@@ -12,6 +12,12 @@ export interface Task {
   est: string;
   projectId: string | null;
   isStarred?: boolean;
+  /**
+   * ISO timestamp of the moment the task was marked in progress; null (or
+   * absent) when it isn't. The In-progress widget's stopwatch counts from here,
+   * so it survives a reload instead of restarting.
+   */
+  startedAt?: string | null;
 }
 
 export type ProjectStatus = 'active' | 'paused' | 'done';

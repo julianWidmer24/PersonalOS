@@ -99,6 +99,24 @@ After running, test:
 2. Reload → the quote is still there.
 3. Open the app in a second browser/device → the same quote loads.
 
+## 7. `012_task_started_at.sql` — apply to sync the in-progress stopwatch ✅
+Adds `tasks.started_at` and indexes it.
+
+Marking a task in progress stamps this column, and the **In progress** widget
+counts up from it — so the elapsed time is the same on every device and a reload
+doesn't restart the clock. Stopping the task, or marking it done, clears it.
+
+Same offline-first fallback as 008: before you run it the toggle still works in
+that browser for as long as the page is open (the update retries without the
+column), but the task won't come back as in progress after a reload.
+
+After running, test:
+1. Hit the ▶ button on a task → `tasks.started_at` is set and the **In progress**
+   widget appears with a stopwatch counting in seconds.
+2. Reload after a minute → the widget is still there and reads `1m 05s`, not `0s`.
+3. Hit **Stop** (or **Done**) → `started_at` goes back to NULL and the widget
+   disappears once nothing is running.
+
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
   keep device-local.
