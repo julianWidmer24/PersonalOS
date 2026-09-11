@@ -1,11 +1,12 @@
 import { useState, useMemo } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { TAG_COLORS, PRIORITY_COLORS, fmtDue, fmtSpan, useClock } from '../lib/dashboardHelpers';
+import { TAG_COLORS, PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import type { Task, Project } from '../types';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
 import { IconBtn } from './shared/IconBtn';
 import { Chip } from './shared/Chip';
+import { ProgressBtn, Elapsed } from './shared/TaskProgress';
 
 function StarBtn({ starred, onStar }: { starred: boolean; onStar: () => void }) {
   return (
@@ -24,43 +25,6 @@ function StarBtn({ starred, onStar }: { starred: boolean; onStar: () => void }) 
         />
       </svg>
     </button>
-  );
-}
-
-/**
- * Start/stop the task's stopwatch. Unlike its neighbours this stays visible
- * once a task is running — a ticking clock you can't see is a clock you forget
- * to stop.
- */
-function ProgressBtn({ running, onToggle }: { running: boolean; onToggle: () => void }) {
-  return (
-    <button
-      onClick={e => { e.stopPropagation(); onToggle(); }}
-      title={running ? 'Stop working on this' : 'Mark in progress'}
-      className={`transition-opacity shrink-0 hover:scale-110 ${
-        running ? 'text-[var(--green)]' : 'opacity-0 group-hover:opacity-100 text-[var(--t3)] hover:text-[var(--t1)]'
-      }`}
-    >
-      {running ? (
-        <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true">
-          <rect x="2.5" y="2.5" width="7" height="7" rx="1.5" fill="currentColor" />
-        </svg>
-      ) : (
-        <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-          <path d="M3.6 2.4l5.4 3.6-5.4 3.6V2.4z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-/** Live "12m 30s" readout, isolated so only this node repaints each second. */
-function Elapsed({ startedAt }: { startedAt: string }) {
-  const now = useClock();
-  return (
-    <span className="text-[10px] tnum shrink-0" style={{ color: 'var(--green)' }}>
-      {fmtSpan(now.getTime() - Date.parse(startedAt))}
-    </span>
   );
 }
 

@@ -1,9 +1,10 @@
 import { useDashboard } from '../context/DashboardContext';
 import { PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import { Card } from './shared/Card';
+import { ProgressBtn, Elapsed } from './shared/TaskProgress';
 
 export function KeyTasks() {
-  const { tasks, toggleTask, starTask, setModal } = useDashboard();
+  const { tasks, toggleTask, starTask, setModal, toggleTaskProgress } = useDashboard();
   const starred = tasks.filter(t => t.isStarred && t.status !== 'done');
 
   if (starred.length === 0) return null;
@@ -26,12 +27,15 @@ export function KeyTasks() {
               <div className="mt-0.5 flex items-center gap-1.5">
                 <span className="text-[10px] tnum font-mono" style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
                 <span className="text-[10.5px] text-[var(--t3)]">{fmtDue(t.due)}</span>
+                {t.startedAt && <Elapsed startedAt={t.startedAt} />}
               </div>
             </div>
+            <div className="mt-0.5 flex items-center gap-2">
+            <ProgressBtn running={!!t.startedAt} onToggle={() => toggleTaskProgress(t.id)} />
             <button
               onClick={() => starTask(t.id)}
               title="Unstar"
-              className="mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              className="opacity-0 group-hover:opacity-100 transition-opacity"
             >
               <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
                 <path
@@ -40,6 +44,7 @@ export function KeyTasks() {
                 />
               </svg>
             </button>
+            </div>
           </li>
         ))}
       </ul>
