@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import type { Task, Project, Habit, JournalEntry, Goal, ModalState } from '../types';
 import { supabase } from '../lib/supabase';
+import { celebrate } from '../lib/celebrate';
 
 // Pure helpers (fmt, TAG_COLORS, PRIORITY_COLORS, useClock) now live in
 // ../lib/dashboardHelpers so this file only exports components + its hook.
@@ -262,6 +263,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
 
   // Cached user_id for inserts (RLS check requires explicit user_id)
   const userIdRef = useRef<string | null>(null);
+  // Latest tasks, readable from a callback without putting `tasks` in its deps.
+  // Used to tell "was this already done?" apart from "is being finished now",
+  // which has to happen outside the setTasks updater: StrictMode invokes those
+  // twice in dev, and a celebration that fires twice is a bug you can see.
+  const tasksRef = useRef<Task[]>([]);
   // Raw habit rows + completion rows, kept so we can re-derive Habit objects
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const habitRowsRef = useRef<any[]>([]);
@@ -481,8 +487,12 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+
   // ── Task mutations ────────────────────────────────────────
   const toggleTask = useCallback((id: string) => {
+    const before = tasksRef.current.find(t => t.id === id);
+    if (before && before.status !== 'done') celebrate();
     setTasks(ts => ts.map(t => {
       if (t.id !== id) return t;
       const newStatus = t.status === 'done' ? 'now' : 'done';
@@ -564,6 +574,8 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     // the caller is setting startedAt itself.
     const patch: Partial<Task> =
       raw.status === 'done' && raw.startedAt === undefined ? { ...raw, startedAt: null } : raw;
+    const before = tasksRef.current.find(t => t.id === id);
+    if (patch.status === 'done' && before && before.status !== 'done') celebrate();
     setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
     const dbPatch: Record<string, unknown> = {};
     if (patch.title     !== undefined) dbPatch.title    = patch.title;
