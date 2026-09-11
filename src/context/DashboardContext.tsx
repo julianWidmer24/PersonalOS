@@ -64,10 +64,16 @@ const STATUS_FROM_DB: Record<string, Task['status']> = {
 };
 
 // ── Done-task expiry ──────────────────────────────────────────
-// A task marked done is hard-deleted 3 weeks later. `completed_at` (migration
+// A task marked done is hard-deleted a day later. `completed_at` (migration
 // 008) is the clock; rows without one are left alone.
-const DONE_TTL_MS = 21 * 24 * 60 * 60 * 1000;
+const DONE_TTL_MS = 24 * 60 * 60 * 1000;
 const DONE_DB_STATUS = STATUS_TO_DB.done;
+
+// Bounds on how long the app waits before re-checking for expired tasks.
+const MIN_PURGE_GAP_MS = 60 * 1000;
+const MAX_PURGE_GAP_MS = 60 * 60 * 1000;
+const clampPurgeWait = (ms: number) =>
+  Math.min(Math.max(ms, MIN_PURGE_GAP_MS), MAX_PURGE_GAP_MS);
 
 const isExpiredDone = (row: { status?: string; completed_at?: string | null }) =>
   row.status === DONE_DB_STATUS &&
@@ -295,9 +301,29 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       userIdRef.current = data.session?.user?.id ?? null;
     });
 
+    // Each done task leaves on its own clock, so instead of sweeping on a fixed
+    // interval — which would let a task finished at noon linger until the next
+    // tick — wake exactly when the oldest one crosses its day.
+    let purgeTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scheduleNextPurge = (live: any[]) => {
+      const due = live
+        .filter(r => r.status === DONE_DB_STATUS && r.completed_at)
+        .map(r => new Date(r.completed_at).getTime() + DONE_TTL_MS);
+
+      // `live` has already had expired rows filtered out, so every due time is
+      // in the future. The ceiling keeps a long-lived tab honest across sleep
+      // and clock changes; the floor means a row the delete can't remove (no
+      // migration 008) costs one query a minute, not a spin.
+      const wait = due.length ? Math.min(...due) - Date.now() : MAX_PURGE_GAP_MS;
+      purgeTimer = setTimeout(loadTasks, clampPurgeWait(wait));
+    };
+
     // Purge first so expired done tasks never make it into the fetch; the
     // local filter is a backstop for when the delete fails (e.g. no migration).
     const loadTasks = async () => {
+      clearTimeout(purgeTimer);
       await purgeExpiredDoneTasks();
       const { data, error } = await supabase
         .from('tasks')
@@ -305,13 +331,16 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
         .eq('archived', false)
         .in('status', ['today', 'this_week', 'this_month', 'backlog'])
         .order('created_at', { ascending: false });
-      if (error) { console.error('tasks fetch error:', error); return; }
-      setTasks((data ?? []).filter(row => !isExpiredDone(row)).map(rowToTask));
+      if (error) {
+        console.error('tasks fetch error:', error);
+        scheduleNextPurge([]);
+        return;
+      }
+      const live = (data ?? []).filter(row => !isExpiredDone(row));
+      setTasks(live.map(rowToTask));
+      scheduleNextPurge(live);
     };
     loadTasks();
-
-    // Re-run periodically so a long-lived session still ages tasks out.
-    const purgeTimer = setInterval(loadTasks, 6 * 60 * 60 * 1000);
 
     const channel = supabase
       .channel('tasks-changes')
@@ -337,7 +366,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       )
       .subscribe();
 
-    return () => { clearInterval(purgeTimer); supabase.removeChannel(channel); };
+    return () => { clearTimeout(purgeTimer); supabase.removeChannel(channel); };
   }, []);
 
   // ── Load habits + habit_completions + realtime ────────────

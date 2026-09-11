@@ -35,22 +35,34 @@ owner-only policies; a zero-policy table silently blocks all access).
 ## 3. `008_task_completed_at.sql` — apply to turn on done-task expiry ✅
 Adds `tasks.completed_at`, backfills existing done rows to `now()`, and indexes it.
 
-The frontend deletes done tasks 3 weeks after `completed_at`. Rows with a NULL
-`completed_at` are never deleted, which is why the backfill matters: without it
-your existing done tasks would sit there forever. With it, they all start a
-fresh 3-week clock from the moment you run the script.
+The frontend deletes done tasks **one day** after `completed_at` (it was 3 weeks
+until the window was shortened; the SQL is unchanged, the app's `DONE_TTL_MS`
+is what moved). Rows with a NULL `completed_at` are never deleted, which is why
+the backfill matters: without it your existing done tasks would sit there
+forever. With it, they all start a fresh clock from the moment you run the
+script — and at a one-day window that means they're gone the next day.
 
 Marking a task done still persists if you *don't* run this — the update retries
 without the column — but nothing will ever expire.
 
+⚠️ The window is retroactive: it's measured from `completed_at`, so anything
+finished more than a day ago goes on the next load, not a day from now. The
+delete is a hard delete, with no archive to recover from. Before the shortened
+window first runs, check what it will take:
+
+```sql
+select id, title, completed_at from public.tasks
+ where status = 'backlog' and completed_at < now() - interval '1 day';
+```
+
 ⚠️ This app stores "done" as the DB's `backlog` status. Anything parked in
 `backlog` that you think of as "not done, just later" will also be deleted after
-3 weeks. Move those out before running.
+a day. Move those out before running.
 
 After running, test:
 1. Mark a task done → `tasks.completed_at` is set on that row.
 2. Un-check it → `completed_at` goes back to NULL.
-3. Hand-set a done task's `completed_at` to 30 days ago, reload the app → the
+3. Hand-set a done task's `completed_at` to 2 days ago, reload the app → the
    task is gone from the list and the row is deleted.
 
 ## 4. `009_workout_day_overrides.sql` — apply for per-day workout edits ✅
