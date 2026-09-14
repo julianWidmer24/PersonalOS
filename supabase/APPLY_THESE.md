@@ -129,9 +129,8 @@ After running, test:
 3. Hit **Stop** (or **Done**) → `started_at` goes back to NULL and the widget
    disappears once nothing is running.
 
-## 8. `013_task_time_spent.sql` — apply for a stopwatch that survives reloads and syncs ⚠️ PARTLY APPLIED
-Columns applied 2026-09-13; the realtime publication step at the end of the
-script has not been run yet. Re-run the whole script — it's idempotent.
+## 8. `013_task_time_spent.sql` — apply for a stopwatch that survives reloads and syncs ✅
+Applied in full on 2026-09-13 (columns and realtime publication).
 
 Adds `tasks.time_spent_ms` (and 012's `started_at`, so this one script covers
 both — as of 2026-09-13 the live DB had **neither** column, which is why a
