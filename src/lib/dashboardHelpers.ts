@@ -77,6 +77,28 @@ export function fmtSpan(ms: number): string {
   return `${s}s`;
 }
 
+/**
+ * Total time tracked on a task: what earlier stints banked plus the stint
+ * that's running now, if any. Clamped so a device whose clock runs behind the
+ * one that started the task never shows a negative segment.
+ */
+export function taskElapsedMs(
+  t: { startedAt?: string | null; timeSpentMs?: number },
+  now: number = Date.now(),
+): number {
+  const running = t.startedAt ? Math.max(0, now - Date.parse(t.startedAt)) : 0;
+  return (t.timeSpentMs ?? 0) + running;
+}
+
+/** True when a task has any time on its clock, running or banked. */
+export const hasTrackedTime = (t: { startedAt?: string | null; timeSpentMs?: number }) =>
+  !!t.startedAt || (t.timeSpentMs ?? 0) > 0;
+
+// ── Undo / redo shortcuts ─────────────────────────────────────
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+export const UNDO_KEY = isMac ? '⌘Z' : 'Ctrl+Z';
+export const REDO_KEY = isMac ? '⌘⇧Z' : 'Ctrl+Y';
+
 // ── Color maps ────────────────────────────────────────────────
 export const TAG_COLORS: Record<string, { fg: string; bg: string }> = {
   course:   { fg: '#a8c5ff', bg: 'rgba(147,197,253,.10)' },

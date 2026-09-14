@@ -129,6 +129,26 @@ After running, test:
 3. Hit **Stop** (or **Done**) → `started_at` goes back to NULL and the widget
    disappears once nothing is running.
 
+## 8. `013_task_time_spent.sql` — apply for a stopwatch that survives reloads and syncs ⚠️ NOT YET APPLIED
+Adds `tasks.time_spent_ms` (and 012's `started_at`, so this one script covers
+both — as of 2026-09-13 the live DB had **neither** column, which is why a
+reload reset the in-progress timer).
+
+Pausing a task (or marking it done) now adds the running stint to
+`time_spent_ms` instead of throwing it away, and starting it again continues
+from that total. Every device computes `time_spent_ms + (now − started_at)`,
+so the laptop and phone read the same and keep ticking. Before you run it the
+stopwatch only lives in that tab's memory.
+
+After running, test:
+1. Hit ▶ on a task → `started_at` is set; the **In progress** widget ticks.
+2. Reload after a minute → it still reads `1m 05s`, not `0s`.
+3. Open the app on your phone → same time, ticking.
+4. Hit **Pause** → `started_at` is NULL and `time_spent_ms` ≈ 65000; the row
+   shows the total greyed out. Hit ▶ again → it continues from there.
+5. Mark it done, then press ⌘Z → it's back in its column, still running, with
+   no time lost.
+
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
   keep device-local.

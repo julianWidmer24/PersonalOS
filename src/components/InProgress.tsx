@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useDashboard } from '../context/DashboardContext';
-import { useClock, fmtSpan, fmtDue, TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
+import { useClock, fmtSpan, fmtDue, taskElapsedMs, TAG_COLORS, PRIORITY_COLORS } from '../lib/dashboardHelpers';
 import type { Task, Project } from '../types';
 import { Card } from './shared/Card';
 import { Chip } from './shared/Chip';
@@ -21,17 +21,18 @@ function LiveDot({ size = 6 }: { size?: number }) {
   );
 }
 
-function StopBtn({ onStop, label }: { onStop: () => void; label: string }) {
+function PauseBtn({ onPause, label }: { onPause: () => void; label: string }) {
   return (
     <button
-      onClick={e => { e.stopPropagation(); onStop(); }}
+      onClick={e => { e.stopPropagation(); onPause(); }}
       title={label}
       className="shrink-0 flex items-center gap-1 px-2 py-1 rounded-md border border-[var(--line)] text-[10.5px] text-[var(--t3)] hover:text-[var(--t1)] hover:border-[var(--line-hi)] transition-colors"
     >
       <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="7" height="7" rx="1.5" fill="currentColor" />
+        <rect x="0.5" y="0.5" width="2.5" height="7" rx="0.8" fill="currentColor" />
+        <rect x="5" y="0.5" width="2.5" height="7" rx="0.8" fill="currentColor" />
       </svg>
-      Stop
+      Pause
     </button>
   );
 }
@@ -60,7 +61,8 @@ export function InProgress() {
   const [lead, ...rest] = running;
   const leadProject: Project | null = lead.projectId ? projById[lead.projectId] ?? null : null;
   const leadTag = TAG_COLORS[lead.tag] || {};
-  const elapsed = (t: { startedAt: string }) => now.getTime() - Date.parse(t.startedAt);
+  // Total time on the task, so a resumed task picks up where it paused.
+  const elapsed = (t: Task) => taskElapsedMs(t, now.getTime());
 
   return (
     <Card title="In progress" kicker={running.length > 1 ? `${running.length} running` : undefined}>
@@ -109,7 +111,7 @@ export function InProgress() {
           </svg>
           Done
         </button>
-        <StopBtn onStop={() => toggleTaskProgress(lead.id)} label="Stop the stopwatch" />
+        <PauseBtn onPause={() => toggleTaskProgress(lead.id)} label="Pause — the time so far is kept" />
       </div>
 
       {rest.length > 0 && (
@@ -128,7 +130,7 @@ export function InProgress() {
                 {fmtSpan(elapsed(t))}
               </span>
               <span className="opacity-0 group-hover:opacity-100 transition-opacity">
-                <StopBtn onStop={() => toggleTaskProgress(t.id)} label={`Stop ${t.title}`} />
+                <PauseBtn onPause={() => toggleTaskProgress(t.id)} label={`Pause ${t.title}`} />
               </span>
             </li>
           ))}

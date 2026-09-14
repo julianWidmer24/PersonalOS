@@ -18,6 +18,11 @@ export interface Task {
    * so it survives a reload instead of restarting.
    */
   startedAt?: string | null;
+  /**
+   * Time already banked from earlier stints, in ms. Pausing adds the running
+   * segment here, so the total is this plus (now − startedAt) while running.
+   */
+  timeSpentMs?: number;
 }
 
 export type ProjectStatus = 'active' | 'paused' | 'done';

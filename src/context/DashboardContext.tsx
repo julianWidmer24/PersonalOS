@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef } f
 import type { Task, Project, Habit, JournalEntry, Goal, ModalState } from '../types';
 import { supabase } from '../lib/supabase';
 import { celebrate } from '../lib/celebrate';
+import { taskElapsedMs } from '../lib/dashboardHelpers';
 
 // Pure helpers (fmt, TAG_COLORS, PRIORITY_COLORS, useClock) now live in
 // ../lib/dashboardHelpers so this file only exports components + its hook.
@@ -89,22 +90,32 @@ async function purgeExpiredDoneTasks() {
   if (error) console.error('purge expired done tasks error:', error);
 }
 
-// Columns added by a migration the live DB may not have run yet (008, 012).
+// Columns added by a migration the live DB may not have run yet (008, 012/013).
 // A patch touching one is retried without it, so the rest of the change still
 // persists — the task just doesn't age out / keep its stopwatch across devices.
-const OPTIONAL_TASK_COLUMNS = ['completed_at', 'started_at'];
+const OPTIONAL_TASK_COLUMNS = ['completed_at', 'started_at', 'time_spent_ms'];
+
+// Optional columns the DB has told us it doesn't have. Only a column the error
+// names lands here, so one missing migration (say 008) can't take the stopwatch
+// columns down with it, and a network blip never disables a column for good.
+const missingTaskColumns = new Set<string>();
 
 async function patchTaskRow(id: string, patch: Record<string, unknown>) {
-  let { error } = await supabase.from('tasks').update(patch).eq('id', id);
-  const optional = OPTIONAL_TASK_COLUMNS.filter(c => c in patch);
-  if (error && optional.length) {
-    const fallback = { ...patch };
-    optional.forEach(c => delete fallback[c]);
-    // Nothing but optional columns to write — the retry would be a no-op.
-    if (!Object.keys(fallback).length) return error;
-    ({ error } = await supabase.from('tasks').update(fallback).eq('id', id));
+  const body = { ...patch };
+  missingTaskColumns.forEach(c => delete body[c]);
+  for (;;) {
+    if (!Object.keys(body).length) return null;
+    const { error } = await supabase.from('tasks').update(body).eq('id', id);
+    if (!error) return null;
+    const optional = OPTIONAL_TASK_COLUMNS.filter(c => c in body);
+    if (!optional.length) return error;
+    const named = optional.filter(c => error.message?.includes(c));
+    named.forEach(c => missingTaskColumns.add(c));
+    // An error that names none of them may still be about one (older PostgREST
+    // wording) — retry without all of them rather than lose the whole patch.
+    (named.length ? named : optional).forEach(c => delete body[c]);
+    if (!Object.keys(body).length) return error;
   }
-  return error;
 }
 
 // tasks.due_date is a real date column — only send it something it can store.
@@ -123,8 +134,47 @@ function rowToTask(row: any): Task {
     projectId: row.project_id ?? null,
     isStarred: row.starred ?? false,
     startedAt: row.started_at ? String(row.started_at) : null,
+    timeSpentMs: Number(row.time_spent_ms ?? 0) || 0,
   };
 }
+
+/** The DB columns that change when a task goes from `before` to `after`. */
+function taskDbDiff(before: Task, after: Task): Record<string, unknown> {
+  const db: Record<string, unknown> = {};
+  if (after.title !== before.title) db.title = after.title;
+  if (after.tag !== before.tag) db.category = tagToCategory(after.tag);
+  if (after.priority !== before.priority) db.priority = priorityToScore(after.priority);
+  if (after.status !== before.status) {
+    db.status = STATUS_TO_DB[after.status] ?? after.status;
+    db.completed_at = after.status === 'done' ? new Date().toISOString() : null;
+  }
+  if (!!after.isStarred !== !!before.isStarred) db.starred = !!after.isStarred;
+  if (after.due !== before.due) db.due_date = toDueDate(after.due);
+  if (after.projectId !== before.projectId) db.project_id = after.projectId;
+  if ((after.startedAt ?? null) !== (before.startedAt ?? null)) db.started_at = after.startedAt ?? null;
+  if ((after.timeSpentMs ?? 0) !== (before.timeSpentMs ?? 0)) db.time_spent_ms = Math.round(after.timeSpentMs ?? 0);
+  return db;
+}
+
+/** A task's clock stopped now, with the running stint banked into its total. */
+function pausedClock(t: Task): Pick<Task, 'startedAt' | 'timeSpentMs'> {
+  return { startedAt: null, timeSpentMs: taskElapsedMs(t) };
+}
+
+// ── Undo / redo ───────────────────────────────────────────────
+interface HistoryEntry {
+  label: string;
+  undo: () => void;
+  redo: () => void;
+}
+/** What just happened to the history, for the toast to announce. */
+export interface HistoryEvent {
+  kind: 'did' | 'undid' | 'redid';
+  label: string;
+  /** Distinguishes two identical events in a row. */
+  seq: number;
+}
+const HISTORY_LIMIT = 50;
 
 // ── Habits: derive done/hist/streak from completions ──────────
 // How far back completions are fetched — and therefore the longest streak that
@@ -233,7 +283,7 @@ interface DashboardApi {
 
   toggleTask: (id: string) => void;
   starTask: (id: string) => void;
-  /** Mark a task in progress (starting its stopwatch) or stop it again. */
+  /** Start a task's stopwatch, or pause it — keeping the time it's tracked. */
   toggleTaskProgress: (id: string) => void;
   toggleHabit: (id: string) => void;
   reorderTasks: (next: Task[]) => void;
@@ -255,6 +305,14 @@ interface DashboardApi {
   updateGoal: (id: string, patch: Partial<Goal>) => void;
   removeGoal: (id: string) => void;
   toggleGoal: (id: string) => void;
+
+  /** Reverse the most recent undoable action (⌘/Ctrl+Z). */
+  undo: () => void;
+  /** Re-apply the most recently undone action (⌘/Ctrl+Y, ⌘/Ctrl+Shift+Z). */
+  redo: () => void;
+  undoLabel: string | null;
+  redoLabel: string | null;
+  lastHistoryEvent: HistoryEvent | null;
 }
 
 const DashCtx = createContext<DashboardApi | null>(null);
@@ -274,6 +332,49 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   // which has to happen outside the setTasks updater: StrictMode invokes those
   // twice in dev, and a celebration that fires twice is a bug you can see.
   const tasksRef = useRef<Task[]>([]);
+  // A task added in this tab has a temporary id until its insert returns; an
+  // undo recorded against it resolves through here to the real row id.
+  const taskIdAliasRef = useRef(new Map<string, string>());
+  // Optimistic tasks whose add was undone before the insert came back.
+  const cancelledAddsRef = useRef(new Set<string>());
+
+  // Undo/redo stacks. Entries close over ids and field snapshots, never over
+  // state, so replaying one always acts on the latest version of the data.
+  const undoStackRef = useRef<HistoryEntry[]>([]);
+  const redoStackRef = useRef<HistoryEntry[]>([]);
+  const [historyLabels, setHistoryLabels] = useState<{ undo: string | null; redo: string | null }>({ undo: null, redo: null });
+  const [lastHistoryEvent, setLastHistoryEvent] = useState<HistoryEvent | null>(null);
+  const historySeqRef = useRef(0);
+
+  const syncHistory = useCallback((kind: HistoryEvent['kind'] | null, label?: string) => {
+    const u = undoStackRef.current, r = redoStackRef.current;
+    setHistoryLabels({ undo: u[u.length - 1]?.label ?? null, redo: r[r.length - 1]?.label ?? null });
+    if (kind && label) setLastHistoryEvent({ kind, label, seq: ++historySeqRef.current });
+  }, []);
+
+  const record = useCallback((entry: HistoryEntry) => {
+    undoStackRef.current = [...undoStackRef.current, entry].slice(-HISTORY_LIMIT);
+    redoStackRef.current = [];
+    syncHistory('did', entry.label);
+  }, [syncHistory]);
+
+  const undo = useCallback(() => {
+    const entry = undoStackRef.current[undoStackRef.current.length - 1];
+    if (!entry) return;
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current, entry];
+    entry.undo();
+    syncHistory('undid', entry.label);
+  }, [syncHistory]);
+
+  const redo = useCallback(() => {
+    const entry = redoStackRef.current[redoStackRef.current.length - 1];
+    if (!entry) return;
+    redoStackRef.current = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = [...undoStackRef.current, entry];
+    entry.redo();
+    syncHistory('redid', entry.label);
+  }, [syncHistory]);
   // Raw habit rows + completion rows, kept so we can re-derive Habit objects
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const habitRowsRef = useRef<any[]>([]);
@@ -354,9 +455,14 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       )
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' },
         (payload) => {
-          setTasks(ts => ts.map(t =>
-            t.id === payload.new.id ? rowToTask(payload.new) : t
-          ));
+          // Archiving is how a task is deleted (and un-archiving how an undo
+          // brings it back), so an UPDATE can add or remove it from the list.
+          const row = payload.new;
+          setTasks(ts => {
+            if (row.archived || isExpiredDone(row)) return ts.filter(t => t.id !== row.id);
+            if (!ts.some(t => t.id === row.id)) return [rowToTask(row), ...ts];
+            return ts.map(t => t.id === row.id ? rowToTask(row) : t);
+          });
         }
       )
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' },
@@ -519,58 +625,112 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   // ── Task mutations ────────────────────────────────────────
-  const toggleTask = useCallback((id: string) => {
+  // Every task edit funnels through here: merge the fields into the latest copy
+  // of the task, then persist only the columns that actually changed. Side
+  // effects stay out of setTasks updaters, which StrictMode runs twice.
+  const applyTaskFields = useCallback((rawId: string, fields: Partial<Task>, context: string) => {
+    const id = taskIdAliasRef.current.get(rawId) ?? rawId;
     const before = tasksRef.current.find(t => t.id === id);
-    if (before && before.status !== 'done') celebrate();
-    setTasks(ts => ts.map(t => {
-      if (t.id !== id) return t;
-      const newStatus = t.status === 'done' ? 'now' : 'done';
-      // Stamp/clear the expiry clock alongside the status change. Finishing a
-      // task also stops its stopwatch — it's no longer in progress.
-      patchTaskRow(id, {
-        status: STATUS_TO_DB[newStatus] ?? newStatus,
-        completed_at: newStatus === 'done' ? new Date().toISOString() : null,
-        started_at: null,
-      }).then(error => { if (error) console.error('toggleTask error:', error); });
-      return { ...t, status: newStatus, startedAt: null };
-    }));
+    if (!before) return;
+    const after = { ...before, ...fields };
+    tasksRef.current = tasksRef.current.map(t => t.id === id ? after : t);
+    setTasks(ts => ts.map(t => t.id === id ? { ...t, ...fields } : t));
+    const dbPatch = taskDbDiff(before, after);
+    if (!Object.keys(dbPatch).length) return;
+    patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
+      .then(error => { if (error) console.error(`${context} error:`, error); });
   }, []);
 
+  /** Apply a change to a task and put it on the undo stack under `label`. */
+  const changeTask = useCallback((id: string, patch: Partial<Task>, label: string, context: string) => {
+    const before = tasksRef.current.find(t => t.id === id);
+    if (!before) return;
+    const keys = (Object.keys(patch) as (keyof Task)[]).filter(k => patch[k] !== before[k]);
+    if (!keys.length) return;
+    const prev = Object.fromEntries(keys.map(k => [k, before[k]])) as Partial<Task>;
+    const next = Object.fromEntries(keys.map(k => [k, patch[k]])) as Partial<Task>;
+    applyTaskFields(id, next, context);
+    record({
+      label,
+      undo: () => applyTaskFields(id, prev, `undo ${context}`),
+      redo: () => applyTaskFields(id, next, `redo ${context}`),
+    });
+  }, [applyTaskFields, record]);
+
+  const toggleTask = useCallback((id: string) => {
+    const t = tasksRef.current.find(x => x.id === id);
+    if (!t) return;
+    if (t.status === 'done') {
+      changeTask(id, { status: 'now' }, `Reopened “${t.title}”`, 'toggleTask');
+      return;
+    }
+    celebrate();
+    // Finishing a task pauses its stopwatch, banking the time it ran. Undo
+    // restores the original clock, so an accidental "done" loses nothing.
+    changeTask(id, { status: 'done', ...pausedClock(t) }, `Marked “${t.title}” done`, 'toggleTask');
+  }, [changeTask]);
+
   const starTask = useCallback((id: string) => {
-    setTasks(ts => ts.map(t => {
-      if (t.id !== id) return t;
-      const next = !t.isStarred;
-      supabase.from('tasks').update({ starred: next }).eq('id', id).then(({ error }) => {
-        if (error) console.error('starTask error:', error);
-      });
-      return { ...t, isStarred: next };
-    }));
-  }, []);
+    const t = tasksRef.current.find(x => x.id === id);
+    if (!t) return;
+    changeTask(id, { isStarred: !t.isStarred }, t.isStarred ? `Unstarred “${t.title}”` : `Starred “${t.title}”`, 'starTask');
+  }, [changeTask]);
 
   // Starting a task stamps the moment it began; the stopwatch counts from that
   // timestamp rather than from a local tick, so it survives reloads and reads
-  // the same on every device. Stopping clears it — pausing isn't a thing yet.
+  // the same on every device. Pausing banks the stint into timeSpentMs, so the
+  // next start picks the total up where it left off.
   const toggleTaskProgress = useCallback((id: string) => {
-    setTasks(ts => ts.map(t => {
-      if (t.id !== id) return t;
-      const next = t.startedAt ? null : new Date().toISOString();
-      patchTaskRow(id, { started_at: next })
-        .then(error => { if (error) console.error('toggleTaskProgress error:', error); });
-      return { ...t, startedAt: next };
-    }));
-  }, []);
+    const t = tasksRef.current.find(x => x.id === id);
+    if (!t) return;
+    if (t.startedAt) changeTask(id, pausedClock(t), `Paused “${t.title}”`, 'toggleTaskProgress');
+    else changeTask(id, { startedAt: new Date().toISOString() }, `Started “${t.title}”`, 'toggleTaskProgress');
+  }, [changeTask]);
 
   const reorderTasks = useCallback((next: Task[]) => setTasks(next), []);
 
+  // Adding again after an undo: the row was archived, not deleted, so bring
+  // that same row back rather than inserting a duplicate.
+  const restoreTask = useCallback((snapshot: Task, context: string) => {
+    const id = taskIdAliasRef.current.get(snapshot.id) ?? snapshot.id;
+    cancelledAddsRef.current.delete(id);
+    const restored = { ...snapshot, id };
+    if (!tasksRef.current.some(t => t.id === id)) {
+      tasksRef.current = [restored, ...tasksRef.current];
+      setTasks(ts => ts.some(t => t.id === id) ? ts : [restored, ...ts]);
+    }
+    if (id.startsWith('tmp-task-')) return; // insert still in flight
+    supabase.from('tasks').update({ archived: false }).eq('id', id).then(({ error }) => {
+      if (error) console.error(`${context} error:`, error);
+    });
+  }, []);
+
+  const archiveTask = useCallback((rawId: string, context: string) => {
+    const id = taskIdAliasRef.current.get(rawId) ?? rawId;
+    tasksRef.current = tasksRef.current.filter(t => t.id !== id);
+    setTasks(ts => ts.filter(t => t.id !== id));
+    // Not inserted yet: archive it the moment the insert returns.
+    if (id.startsWith('tmp-task-')) { cancelledAddsRef.current.add(id); return; }
+    supabase.from('tasks').update({ archived: true }).eq('id', id).then(({ error }) => {
+      if (error) console.error(`${context} error:`, error);
+    });
+  }, []);
+
   const addTask = useCallback((data: Partial<Task>) => {
-    const optimisticId = 't' + Math.random().toString(36).slice(2, 8);
+    const optimisticId = 'tmp-task-' + Math.random().toString(36).slice(2, 10);
     const optimistic: Task = {
       id: optimisticId,
       status: 'now', priority: 'P1', tag: 'personal', est: '—', due: '—', projectId: null,
       title: '', isStarred: false,
       ...data,
     };
+    tasksRef.current = [optimistic, ...tasksRef.current];
     setTasks(ts => [optimistic, ...ts]);
+    record({
+      label: `Added “${optimistic.title}”`,
+      undo: () => archiveTask(optimisticId, 'undo addTask'),
+      redo: () => restoreTask(optimistic, 'redo addTask'),
+    });
     const payload: Record<string, unknown> = {
       user_id:  userIdRef.current,
       title:    optimistic.title,
@@ -591,49 +751,64 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       }
       if (error) {
         console.error('addTask error:', error);
+        tasksRef.current = tasksRef.current.filter(t => t.id !== optimisticId);
         setTasks(ts => ts.filter(t => t.id !== optimisticId));
         return;
       }
-      setTasks(ts => ts.map(t => t.id === optimisticId ? rowToTask(row) : t));
+      taskIdAliasRef.current.set(optimisticId, row.id);
+      if (cancelledAddsRef.current.delete(optimisticId)) {
+        // Undone while the insert was in flight — archive the row it made, and
+        // move a pending redo onto the real id.
+        supabase.from('tasks').update({ archived: true }).eq('id', row.id).then(({ error: e }) => {
+          if (e) console.error('undo addTask error:', e);
+        });
+        setTasks(ts => ts.filter(t => t.id !== row.id));
+        return;
+      }
+      // The insert leaves the optional stopwatch columns out (a DB without them
+      // would reject the whole row), so a task started from the form gets its
+      // clock written as a follow-up patch.
+      const clockPatch = taskDbDiff(rowToTask(row), { ...rowToTask(row), startedAt: optimistic.startedAt, timeSpentMs: optimistic.timeSpentMs });
+      if (Object.keys(clockPatch).length) {
+        patchTaskRow(row.id, clockPatch).then(e => { if (e) console.error('addTask clock error:', e); });
+      }
+      const real = { ...rowToTask(row), startedAt: optimistic.startedAt ?? null, timeSpentMs: optimistic.timeSpentMs ?? 0 };
+      tasksRef.current = tasksRef.current.map(t => t.id === optimisticId ? real : t);
+      // Realtime may have delivered the INSERT first; don't list it twice.
+      setTasks(ts => ts.filter(t => t.id !== real.id).map(t => t.id === optimisticId ? real : t));
     });
-  }, []);
+  }, [record, archiveTask, restoreTask]);
 
   const updateTask = useCallback((id: string, raw: Partial<Task>) => {
-    // Moving a task to done stops its stopwatch, however it got there — unless
-    // the caller is setting startedAt itself.
-    const patch: Partial<Task> =
-      raw.status === 'done' && raw.startedAt === undefined ? { ...raw, startedAt: null } : raw;
     const before = tasksRef.current.find(t => t.id === id);
-    if (patch.status === 'done' && before && before.status !== 'done') celebrate();
-    setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
-    const dbPatch: Record<string, unknown> = {};
-    if (patch.title     !== undefined) dbPatch.title    = patch.title;
-    if (patch.tag       !== undefined) dbPatch.category = tagToCategory(patch.tag);
-    if (patch.priority  !== undefined) dbPatch.priority = priorityToScore(patch.priority);
-    if (patch.status    !== undefined) {
-      dbPatch.status = STATUS_TO_DB[patch.status] ?? patch.status;
-      dbPatch.completed_at = patch.status === 'done' ? new Date().toISOString() : null;
-    }
-    if (patch.isStarred !== undefined) dbPatch.starred  = patch.isStarred;
-    if (patch.due       !== undefined) dbPatch.due_date = toDueDate(patch.due);
-    if (patch.projectId !== undefined) dbPatch.project_id = patch.projectId;
-    if (patch.startedAt !== undefined) dbPatch.started_at = patch.startedAt;
-    if (Object.keys(dbPatch).length) {
-      patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
-        .then(error => { if (error) console.error('updateTask error:', error); });
-    }
-  }, []);
+    if (!before) return;
+    // Moving a task to done stops its stopwatch, however it got there, banking
+    // the time it ran — unless the caller is setting the clock itself.
+    const finishing = raw.status === 'done' && before.status !== 'done';
+    const patch: Partial<Task> =
+      finishing && raw.startedAt === undefined ? { ...raw, ...pausedClock(before) } : raw;
+    if (finishing) celebrate();
+    const label = finishing
+      ? `Marked “${before.title}” done`
+      : raw.status && raw.status !== before.status && Object.keys(raw).length === 1
+        ? `Moved “${before.title}”`
+        : `Edited “${before.title}”`;
+    changeTask(id, patch, label, 'updateTask');
+  }, [changeTask]);
 
   const removeTask = useCallback((id: string) => {
-    setTasks(ts => ts.filter(t => t.id !== id));
-    supabase.from('tasks').update({ archived: true })
-      .eq('id', id).then(({ error }) => {
-        if (error) console.error('removeTask error:', error);
-      });
-  }, []);
+    const snapshot = tasksRef.current.find(t => t.id === id);
+    if (!snapshot) return;
+    archiveTask(id, 'removeTask');
+    record({
+      label: `Deleted “${snapshot.title}”`,
+      undo: () => restoreTask(snapshot, 'undo removeTask'),
+      redo: () => archiveTask(snapshot.id, 'redo removeTask'),
+    });
+  }, [archiveTask, restoreTask, record]);
 
   // ── Habit mutations ───────────────────────────────────────
-  const toggleHabit = useCallback((id: string) => {
+  const toggleHabitRaw = useCallback((id: string) => {
     const today = todayStr();
     const existing = completionRowsRef.current.find(
       c => c.habit_id === id && String(c.completed_date) === today,
@@ -676,6 +851,21 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     }
     recomputeHabits();
   }, [recomputeHabits]);
+
+  // Checking a habit off is its own inverse, so undo and redo both re-toggle.
+  const toggleHabit = useCallback((id: string) => {
+    const habit = habitRowsRef.current.find(h => h.id === id);
+    const doneToday = completionRowsRef.current.some(
+      c => c.habit_id === id && String(c.completed_date) === todayStr() && c.fully_completed,
+    );
+    toggleHabitRaw(id);
+    const name = habit?.name ?? 'habit';
+    record({
+      label: doneToday ? `Unchecked “${name}”` : `Checked “${name}”`,
+      undo: () => toggleHabitRaw(id),
+      redo: () => toggleHabitRaw(id),
+    });
+  }, [toggleHabitRaw, record]);
 
   const addHabit = useCallback((data: Partial<Habit>) => {
     const name = (data.name ?? '').trim();
@@ -815,11 +1005,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const assignTask = useCallback((taskId: string, projectId: string | null) => {
-    setTasks(ts => ts.map(t => t.id === taskId ? { ...t, projectId } : t));
-    supabase.from('tasks').update({ project_id: projectId }).eq('id', taskId).then(({ error }) => {
-      if (error) console.error('assignTask error (is the project_id migration applied?):', error);
-    });
-  }, []);
+    const t = tasksRef.current.find(x => x.id === taskId);
+    if (!t) return;
+    const label = projectId ? `Added “${t.title}” to a project` : `Unlinked “${t.title}”`;
+    changeTask(taskId, { projectId }, label, 'assignTask (is the project_id migration applied?)');
+  }, [changeTask]);
 
   // ── Goal mutations ────────────────────────────────────────
   const addGoal = useCallback((data: Partial<Goal>) => {
@@ -851,7 +1041,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const updateGoal = useCallback((id: string, patch: Partial<Goal>) => {
+  const goalsRef = useRef<Goal[]>([]);
+  useEffect(() => { goalsRef.current = goals; }, [goals]);
+
+  const updateGoalRaw = useCallback((id: string, patch: Partial<Goal>) => {
+    goalsRef.current = goalsRef.current.map(g => g.id === id ? { ...g, ...patch } : g);
     setGoals(gs => gs.map(g => g.id === id ? { ...g, ...patch } : g));
     const dbPatch: Record<string, unknown> = {};
     if (patch.title      !== undefined) dbPatch.title     = patch.title;
@@ -875,17 +1069,27 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const updateGoal = useCallback((id: string, patch: Partial<Goal>, label?: string) => {
+    const before = goalsRef.current.find(g => g.id === id);
+    if (!before) return;
+    const keys = (Object.keys(patch) as (keyof Goal)[]).filter(k => patch[k] !== before[k]);
+    if (!keys.length) return;
+    const prev = Object.fromEntries(keys.map(k => [k, before[k]])) as Partial<Goal>;
+    const next = Object.fromEntries(keys.map(k => [k, patch[k]])) as Partial<Goal>;
+    updateGoalRaw(id, next);
+    record({
+      label: label ?? `Edited “${before.title}”`,
+      undo: () => updateGoalRaw(id, prev),
+      redo: () => updateGoalRaw(id, next),
+    });
+  }, [updateGoalRaw, record]);
+
   const toggleGoal = useCallback((id: string) => {
-    setGoals(gs => gs.map(g => {
-      if (g.id !== id) return g;
-      const next = !g.isComplete;
-      supabase.from('goals').update({ status: next ? 'completed' : 'active' })
-        .eq('id', id).then(({ error }) => {
-          if (error) console.error('toggleGoal error:', error);
-        });
-      return { ...g, isComplete: next };
-    }));
-  }, []);
+    const g = goalsRef.current.find(x => x.id === id);
+    if (!g) return;
+    updateGoal(id, { isComplete: !g.isComplete },
+      g.isComplete ? `Reopened “${g.title}”` : `Completed “${g.title}”`);
+  }, [updateGoal]);
 
   const api: DashboardApi = {
     tasks, setTasks, habits, setHabits, journal, setJournal,
@@ -895,6 +1099,10 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     addHabit, updateHabit, removeHabit,
     addProject, updateProject, removeProject, assignTask,
     addGoal, updateGoal, removeGoal, toggleGoal,
+    undo, redo,
+    undoLabel: historyLabels.undo,
+    redoLabel: historyLabels.redo,
+    lastHistoryEvent,
   };
 
   return <DashCtx.Provider value={api}>{children}</DashCtx.Provider>;

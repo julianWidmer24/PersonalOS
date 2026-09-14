@@ -7,6 +7,7 @@ import { TopBar } from './components/TopBar';
 import { BottomNav } from './components/BottomNav';
 import { TaskModal } from './components/modals/TaskModal';
 import { JournalModal } from './components/modals/JournalModal';
+import { UndoToast } from './components/UndoToast';
 import { LoginPage } from './pages/LoginPage';
 
 // Route-level code splitting: each page ships as its own chunk, loaded on
@@ -50,6 +51,7 @@ function Layout() {
       </Suspense>
       <TaskModal />
       <JournalModal />
+      <UndoToast />
       <BottomNav />
     </div>
   );

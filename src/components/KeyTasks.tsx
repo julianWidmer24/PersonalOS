@@ -2,6 +2,7 @@ import { useDashboard } from '../context/DashboardContext';
 import { PRIORITY_COLORS, fmtDue } from '../lib/dashboardHelpers';
 import { Card } from './shared/Card';
 import { ProgressBtn, Elapsed } from './shared/TaskProgress';
+import { hasTrackedTime } from '../lib/dashboardHelpers';
 
 export function KeyTasks() {
   const { tasks, toggleTask, starTask, setModal, toggleTaskProgress } = useDashboard();
@@ -27,7 +28,7 @@ export function KeyTasks() {
               <div className="mt-0.5 flex items-center gap-1.5">
                 <span className="text-[10px] tnum font-mono" style={{ color: PRIORITY_COLORS[t.priority] }}>{t.priority}</span>
                 <span className="text-[10.5px] text-[var(--t3)]">{fmtDue(t.due)}</span>
-                {t.startedAt && <Elapsed startedAt={t.startedAt} />}
+                {hasTrackedTime(t) && <Elapsed task={t} />}
               </div>
             </div>
             <div className="mt-0.5 flex items-center gap-2">

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useDashboard } from '../context/DashboardContext';
+import { UNDO_KEY, REDO_KEY } from '../lib/dashboardHelpers';
 
 const NAV_ITEMS = [
   { label: 'Today',    to: '/'          },
@@ -14,10 +16,29 @@ const NAV_ITEMS = [
   { label: 'Settings', to: '/settings'  },
 ] as const;
 
+function HistoryBtn({ onClick, disabled, title, path }: {
+  onClick: () => void; disabled: boolean; title: string; path: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      className="w-7 h-7 rounded-md grid place-items-center text-[var(--t2)] hover:text-[var(--t1)] hover:bg-[var(--bg-card)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+        <path d={path} stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
+  );
+}
+
 export function TopBar() {
   const { signOut } = useAuth();
   const [open, setOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const { undo, redo, undoLabel, redoLabel } = useDashboard();
 
   return (
     <header className="sticky top-0 z-30 border-b border-[var(--line)] bg-[var(--bg)]/95 backdrop-blur-md">
@@ -43,6 +64,20 @@ export function TopBar() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex items-center">
+            <HistoryBtn
+              onClick={undo}
+              disabled={!undoLabel}
+              title={undoLabel ? `Undo: ${undoLabel} (${UNDO_KEY})` : 'Nothing to undo'}
+              path="M4.5 3L2 5.5 4.5 8M2.5 5.5h5.25a3 3 0 010 6H6"
+            />
+            <HistoryBtn
+              onClick={redo}
+              disabled={!redoLabel}
+              title={redoLabel ? `Redo: ${redoLabel} (${REDO_KEY})` : 'Nothing to redo'}
+              path="M9.5 3L12 5.5 9.5 8M11.5 5.5H6.25a3 3 0 000 6H8"
+            />
+          </div>
           <div className="hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-md border border-[var(--line)] text-[11px] text-[var(--t3)]">
             <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
               <circle cx="5" cy="5" r="3.5" stroke="currentColor" strokeWidth="1.2" />

@@ -7,6 +7,7 @@ import { Tabs } from './shared/Tabs';
 import { IconBtn } from './shared/IconBtn';
 import { Chip } from './shared/Chip';
 import { ProgressBtn, Elapsed } from './shared/TaskProgress';
+import { hasTrackedTime } from '../lib/dashboardHelpers';
 
 function StarBtn({ starred, onStar }: { starred: boolean; onStar: () => void }) {
   return (
@@ -152,7 +153,7 @@ function TaskRow({ t, onToggle, onStar, onDelete, onEdit, onProgress, onDragStar
             )}
             <span className="text-[10.5px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
             <span className="ml-auto flex items-center gap-1.5">
-              {running && <Elapsed startedAt={t.startedAt!} />}
+              {hasTrackedTime(t) && <Elapsed task={t} />}
               <span className="text-[10.5px] text-[var(--t4)] tnum">{t.est}</span>
             </span>
           </div>
@@ -312,7 +313,7 @@ export function TaskCRM() {
                                     </span>
                                   )}
                                   <span className="text-[10px] text-[var(--t3)] truncate">{fmtDue(t.due)}</span>
-                                  {running && <Elapsed startedAt={t.startedAt!} />}
+                                  {hasTrackedTime(t) && <Elapsed task={t} />}
                                   <span className="ml-auto flex items-center gap-2">
                                     {col.id !== 'done' && (
                                       <ProgressBtn running={running} onToggle={() => toggleTaskProgress(t.id)} />

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useDashboard } from '../../context/DashboardContext';
-import { useClock, fmtSpan } from '../../lib/dashboardHelpers';
+import { useClock, fmtSpan, taskElapsedMs } from '../../lib/dashboardHelpers';
 import type { Task } from '../../types';
 import { ModalShell } from '../shared/ModalShell';
 
@@ -12,9 +12,9 @@ const STATUSES = ['now', 'next', 'later', 'done'] as const;
 const asDateValue = (due?: string) => (due && /^\d{4}-\d{2}-\d{2}$/.test(due) ? due : '');
 
 /** Ticks on its own so typing in the form doesn't repaint once a second. */
-function Elapsed({ startedAt }: { startedAt: string }) {
+function Elapsed({ clock }: { clock: { startedAt: string | null; timeSpentMs: number } }) {
   const now = useClock();
-  return <span className="tnum">{fmtSpan(now.getTime() - Date.parse(startedAt))}</span>;
+  return <span className="tnum">{fmtSpan(taskElapsedMs(clock, now.getTime()))}</span>;
 }
 
 function TaskForm({ task }: { task: Task | null }) {
@@ -26,8 +26,18 @@ function TaskForm({ task }: { task: Task | null }) {
   const [due, setDue] = useState(asDateValue(task?.due));
   const [projectId, setProjectId] = useState(task?.projectId ?? '');
   // Held rather than applied immediately, like every other field here — the
-  // stopwatch starts from the moment you flip the switch, not from Save.
-  const [startedAt, setStartedAt] = useState<string | null>(task?.startedAt ?? null);
+  // stopwatch starts (or pauses) at the moment you flip the switch, not at Save.
+  const [clock, setClock] = useState({
+    startedAt: task?.startedAt ?? null,
+    timeSpentMs: task?.timeSpentMs ?? 0,
+  });
+  // Only send the clock on Save if it was touched here — otherwise a pause from
+  // another device while this form sat open would be overwritten.
+  const [clockTouched, setClockTouched] = useState(false);
+  const startedAt = clock.startedAt;
+  const toggleClock = () => { setClockTouched(true); setClock(c => c.startedAt
+    ? { startedAt: null, timeSpentMs: taskElapsedMs(c) }
+    : { ...c, startedAt: new Date().toISOString() }); };
 
   const close = () => setModal(null);
   const save = () => {
@@ -39,8 +49,11 @@ function TaskForm({ task }: { task: Task | null }) {
       status,
       due: due || '—',
       projectId: projectId || null,
-      // A finished task is never in progress, whichever control set it done.
-      startedAt: status === 'done' ? null : startedAt,
+      // A finished task is never in progress, whichever control set it done;
+      // finishing banks the running stint rather than dropping it.
+      ...(!clockTouched ? {} : status === 'done' && clock.startedAt
+        ? { startedAt: null, timeSpentMs: taskElapsedMs(clock) }
+        : clock),
     };
     if (task) updateTask(task.id, fields);
     else addTask({ ...fields, est: '—' });
@@ -110,7 +123,7 @@ function TaskForm({ task }: { task: Task | null }) {
         </div>
         <button
           type="button"
-          onClick={() => setStartedAt(startedAt ? null : new Date().toISOString())}
+          onClick={toggleClock}
           disabled={status === 'done'}
           className={`mt-3 w-full flex items-center gap-2 px-3 py-2 rounded-md border text-left transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
             startedAt && status !== 'done'
@@ -125,10 +138,12 @@ function TaskForm({ task }: { task: Task | null }) {
           <span className="text-[12px] text-[var(--t1)] flex-1">In progress</span>
           <span className="text-[10.5px] text-[var(--t3)]">
             {status === 'done'
-              ? 'finished'
+              ? clock.timeSpentMs || startedAt ? <>finished · <Elapsed clock={clock} /></> : 'finished'
               : startedAt
-                ? <>running · <Elapsed startedAt={startedAt} /></>
-                : 'start the stopwatch'}
+                ? <>running · <Elapsed clock={clock} /></>
+                : clock.timeSpentMs
+                  ? <>paused · <Elapsed clock={clock} /></>
+                  : 'start the stopwatch'}
           </span>
         </button>
         <div className="mt-5 flex items-center justify-end gap-2">
