@@ -22,6 +22,18 @@ create index if not exists tasks_started_at_idx
 alter table public.tasks
   add column if not exists time_spent_ms bigint not null default 0;
 
+-- Stream task changes to other open devices, so starting or pausing a task on
+-- one shows up live on the rest. RLS still limits each user to their own rows.
+do $$
+begin
+  if not exists (
+    select 1 from pg_publication_tables
+     where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'tasks'
+  ) then
+    alter publication supabase_realtime add table public.tasks;
+  end if;
+end $$;
+
 -- PostgREST caches the schema; without this the new columns can take a while
 -- to become writable from the app.
 notify pgrst, 'reload schema';

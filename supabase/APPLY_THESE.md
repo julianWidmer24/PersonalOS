@@ -129,10 +129,15 @@ After running, test:
 3. Hit **Stop** (or **Done**) → `started_at` goes back to NULL and the widget
    disappears once nothing is running.
 
-## 8. `013_task_time_spent.sql` — apply for a stopwatch that survives reloads and syncs ⚠️ NOT YET APPLIED
+## 8. `013_task_time_spent.sql` — apply for a stopwatch that survives reloads and syncs ⚠️ PARTLY APPLIED
+Columns applied 2026-09-13; the realtime publication step at the end of the
+script has not been run yet. Re-run the whole script — it's idempotent.
+
 Adds `tasks.time_spent_ms` (and 012's `started_at`, so this one script covers
 both — as of 2026-09-13 the live DB had **neither** column, which is why a
-reload reset the in-progress timer).
+reload reset the in-progress timer). It also adds `tasks` to the
+`supabase_realtime` publication, which it was missing, so changes on one device
+appear live on the others instead of only after a reload.
 
 Pausing a task (or marking it done) now adds the running stint to
 `time_spent_ms` instead of throwing it away, and starting it again continues
