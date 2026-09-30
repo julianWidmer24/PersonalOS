@@ -60,6 +60,7 @@ idempotent and non-destructive:
 - `008_task_completed_at.sql`    (done-task expiry)
 - `009_workout_day_overrides.sql` (per-day workout edits)
 - `010_academic_plans.sql`       (Academics course planner sync)
+- `014_task_completions.sql`     (completed-tasks counter + distribution chart)
 
 ⚠️ Never run `supabase db push` — your live schema has drifted from the older
 migrations and a push would try to force conflicting shapes.

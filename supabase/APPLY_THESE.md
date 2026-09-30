@@ -32,8 +32,32 @@ After running, test (open DevTools → Network to watch the calls):
 If anything errors, check the Supabase logs and RLS policies (the script sets
 owner-only policies; a zero-policy table silently blocks all access).
 
-## 3. `008_task_completed_at.sql` — apply to turn on done-task expiry ✅
+## 3. `008_task_completed_at.sql` — applied 2026-09-29, **backfill deliberately skipped** ⚠️
 Adds `tasks.completed_at`, backfills existing done rows to `now()`, and indexes it.
+
+⚠️ **Only the column and the index were applied.** As of 2026-09-29 the live DB
+had never run this migration at all (which is why nothing had ever expired, and
+why the completed-today counter reset on every realtime echo — `rowToTask` read
+a column that wasn't there). At that point 66 tasks were sitting in the done
+bucket going back to June, and the backfill would have stamped every one of them
+with `now()` and hard-deleted the lot a day later.
+
+So what actually ran was:
+
+```sql
+alter table public.tasks add column if not exists completed_at timestamptz;
+create index if not exists tasks_completed_at_idx
+  on public.tasks (completed_at) where completed_at is not null;
+```
+
+Those 66 rows keep `completed_at = NULL`. The purge compares
+`completed_at < cutoff`, and NULL fails that test, so they are never collected —
+clear them by hand if you want them gone. Expiry is live for everything finished
+from 2026-09-29 onward.
+
+⚠️ **Do not run the backfill later.** It targets exactly
+`status = 'backlog' and completed_at is null`, which is still those 66 rows, and
+running it now would delete them a day afterwards.
 
 The frontend deletes done tasks **one day** after `completed_at` (it was 3 weeks
 until the window was shortened; the SQL is unchanged, the app's `DONE_TTL_MS`
@@ -152,6 +176,46 @@ After running, test:
    shows the total greyed out. Hit ▶ again → it continues from there.
 5. Mark it done, then press ⌘Z → it's back in its column, still running, with
    no time lost.
+
+## 9. `014_task_completions.sql` — applied in full 2026-09-29 ✅
+Creates `task_completions`: one row per finished task, written the moment you
+check it off.
+
+Applied via `supabase db query --linked -f supabase/migrations/014_task_completions.sql`
+(table, 4 owner policies, 3 indexes, realtime publication, `task_id` FK confirmed
+`on delete set null`). **Its backfill inserted nothing**: the guard found no
+`tasks.completed_at` — section 3 above explains why — so there was no history to
+recover and the chart starts accumulating from the first check-off after that
+date.
+
+It exists because done tasks are **deleted a day later** (see 008). That keeps
+the board clean but leaves the app with no memory of last Tuesday, so there was
+nothing to plot. A completion row outlives its task: `task_id` is
+`on delete set null`, and the title/category are copied onto the row, so the
+purge takes the task and leaves the record. The script also backfills a row for
+every task currently sitting in the done bucket, so the chart isn't empty on day
+one.
+
+`completed_date` is the **local** date and is written by the client — counting
+"done today" off a server-side `date(completed_at)` would roll over at UTC
+midnight, which is 5pm in Berkeley.
+
+Same offline-first fallback as 008: before you run it, checking tasks off still
+works and the **Open tasks** card still shows today's count (it falls back to
+the done tasks still on the board), but the count resets when those tasks expire
+and the **Tasks completed** card has nothing older than today to draw.
+
+After running, test:
+1. Check a task off → `task_completions` gains a row with today's
+   `completed_date`, and the **Open tasks** card reads `✓ 1 done today`.
+2. Press ⌘Z (or un-check it) → the row is deleted and the counter drops back.
+3. Check it off, un-check it, check it again the same day → still exactly one
+   row (the unique index is per task per day).
+4. Open the app on your phone → the same counter and chart; checking something
+   off there moves both here without a reload.
+5. Hand-set a done task's `completed_at` to 2 days ago and reload → the task is
+   purged, and its completion row survives with `task_id` now NULL. It still
+   counts in the **Month** and **Year** views.
 
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
