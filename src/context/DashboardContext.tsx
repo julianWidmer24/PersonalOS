@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { Task, Project, Habit, JournalEntry, Goal, ModalState, TaskCompletion } from '../types';
+import type { Task, Project, Habit, JournalEntry, Goal, ModalState, TaskCompletion, TaskSession } from '../types';
 import { supabase } from '../lib/supabase';
 import { celebrate } from '../lib/celebrate';
 import { taskElapsedMs } from '../lib/dashboardHelpers';
@@ -169,6 +169,34 @@ function rowToCompletion(row: any): TaskCompletion {
   };
 }
 
+// ── Session log ───────────────────────────────────────────────
+// `time_spent_ms` is a total; this is the placement. One row per stint, open
+// while the stopwatch runs (migration 015), so the tracked-time calendar can
+// draw *when* the work happened and not just how much of it there was.
+
+/** How far back sessions are loaded — the calendar never pages beyond this. */
+const SESSION_HISTORY_DAYS = 120;
+
+/**
+ * A stint this short is a misclick, not work. Closing one deletes it instead
+ * of leaving a hairline on the calendar — which also means undoing a "Started"
+ * a second later tidies up after itself.
+ */
+const MIN_SESSION_MS = 30_000;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToSession(row: any): TaskSession {
+  return {
+    id:        row.id,
+    taskId:    row.task_id ?? null,
+    title:     row.title ?? '',
+    tag:       tagFromCategory(row.category),
+    projectId: row.project_id ?? null,
+    startedAt: String(row.started_at),
+    endedAt:   row.ended_at ? String(row.ended_at) : null,
+  };
+}
+
 /** A task's clock stopped now, with the running stint banked into its total. */
 function pausedClock(t: Task): Pick<Task, 'startedAt' | 'timeSpentMs'> {
   return { startedAt: null, timeSpentMs: taskElapsedMs(t) };
@@ -299,6 +327,8 @@ interface DashboardApi {
    * is right even before migration 014 is applied.
    */
   doneByDay: Map<string, number>;
+  /** Every tracked stint in the recent past, newest first; open ones included. */
+  sessions: TaskSession[];
   modal: ModalState;
   setModal: (m: ModalState) => void;
 
@@ -345,6 +375,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [goals, setGoals]       = useState<Goal[]>([]);
   const [completions, setCompletions] = useState<TaskCompletion[]>([]);
+  const [sessions, setSessions] = useState<TaskSession[]>([]);
   const [modal, setModal]       = useState<ModalState>(null);
 
   // Cached user_id for inserts (RLS check requires explicit user_id)
@@ -364,6 +395,8 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   // Optimistic completions un-logged before their insert came back; the real
   // row is deleted the moment the insert hands us its id.
   const cancelledCompletionsRef = useRef(new Set<string>());
+  // Latest sessions, readable from a callback without re-creating it.
+  const sessionsRef = useRef<TaskSession[]>([]);
 
   // Undo/redo stacks. Entries close over ids and field snapshots, never over
   // state, so replaying one always acts on the latest version of the data.
@@ -686,6 +719,42 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { completionsRef.current = completions; }, [completions]);
 
+  // ── Load the session log + realtime ───────────────────────
+  // Same tolerance as the completion log: on a database without migration 015
+  // the fetch errors once and the tracked-time calendar simply stays empty.
+  useEffect(() => {
+    const since = addDays(new Date(), -SESSION_HISTORY_DAYS).toISOString();
+
+    supabase
+      .from('task_sessions')
+      .select('*')
+      .gte('started_at', since)
+      .order('started_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) { console.error('task_sessions fetch error:', error); return; }
+        const rows = (data ?? []).map(rowToSession);
+        sessionsRef.current = rows;
+        setSessions(rows);
+      });
+
+    const upsert = (row: TaskSession) => setSessions(ss =>
+      ss.some(x => x.id === row.id) ? ss.map(x => x.id === row.id ? row : x) : [row, ...ss]);
+
+    const channel = supabase
+      .channel('task-sessions-changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_sessions' },
+        (payload) => upsert(rowToSession(payload.new)))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_sessions' },
+        (payload) => upsert(rowToSession(payload.new)))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'task_sessions' },
+        (payload) => setSessions(ss => ss.filter(x => x.id !== payload.old.id)))
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   // ── Task mutations ────────────────────────────────────────
@@ -751,6 +820,67 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // Open a stint. The row carries its own title/category/project so the block
+  // still renders after the task is purged a day after being finished.
+  const openSession = useCallback((task: Task, at: string) => {
+    if (task.id.startsWith('tmp-task-')) return; // no real id to hang it off yet
+    const tempId = 'tmp-session-' + Math.random().toString(36).slice(2, 10);
+    const optimistic: TaskSession = {
+      id: tempId, taskId: task.id, title: task.title, tag: task.tag,
+      projectId: task.projectId, startedAt: at, endedAt: null,
+    };
+    sessionsRef.current = [optimistic, ...sessionsRef.current];
+    setSessions(ss => [optimistic, ...ss]);
+
+    supabase.from('task_sessions').insert({
+      user_id:    userIdRef.current,
+      task_id:    task.id,
+      title:      task.title,
+      category:   tagToCategory(task.tag),
+      project_id: task.projectId,
+      started_at: at,
+    }).select().single().then(({ data: row, error }) => {
+      setSessions(ss => {
+        const rest = ss.filter(x => x.id !== tempId);
+        return error ? rest : [rowToSession(row), ...rest.filter(x => x.id !== row.id)];
+      });
+      // No migration 015, or the partial unique index caught a double-start.
+      if (error) console.error('openSession error:', error);
+    });
+  }, []);
+
+  /**
+   * Close the stint a task has open. A stint under MIN_SESSION_MS is deleted
+   * rather than closed — an accidental start, or one undone a second later,
+   * shouldn't leave a mark on the calendar.
+   */
+  const closeSession = useCallback((taskId: string, at: string) => {
+    const open = sessionsRef.current.find(x => x.taskId === taskId && x.endedAt == null);
+    if (!open) return;
+    const tooShort = Date.parse(at) - Date.parse(open.startedAt) < MIN_SESSION_MS;
+
+    if (tooShort) {
+      sessionsRef.current = sessionsRef.current.filter(x => x.id !== open.id);
+      setSessions(ss => ss.filter(x => x.id !== open.id));
+    } else {
+      const closed = { ...open, endedAt: at };
+      sessionsRef.current = sessionsRef.current.map(x => x.id === open.id ? closed : x);
+      setSessions(ss => ss.map(x => x.id === open.id ? closed : x));
+    }
+    // An insert still in flight has no row id yet, so match on the task's open
+    // stint instead — the partial unique index guarantees there is only one.
+    const pending = open.id.startsWith('tmp-session-');
+    const rows = () => supabase.from('task_sessions');
+    const result = tooShort
+      ? (pending
+          ? rows().delete().eq('task_id', taskId).is('ended_at', null)
+          : rows().delete().eq('id', open.id))
+      : (pending
+          ? rows().update({ ended_at: at }).eq('task_id', taskId).is('ended_at', null)
+          : rows().update({ ended_at: at }).eq('id', open.id));
+    result.then(({ error }) => { if (error) console.error('closeSession error:', error); });
+  }, []);
+
   // Every task edit funnels through here: merge the fields into the latest copy
   // of the task, then persist only the columns that actually changed. Side
   // effects stay out of setTasks updaters, which StrictMode runs twice.
@@ -775,11 +905,21 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       if (after.status === 'done') logCompletion(after, after.completedAt ?? new Date().toISOString());
       else unlogCompletion(id);
     }
+    // The stopwatch starting or stopping bookends a stint. Finishing a task
+    // stops its clock too, so that lands here rather than needing its own path.
+    const wasRunning = !!before.startedAt;
+    const isRunning = !!after.startedAt;
+    if (wasRunning && (!isRunning || before.startedAt !== after.startedAt)) {
+      closeSession(id, new Date().toISOString());
+    }
+    if (isRunning && (!wasRunning || before.startedAt !== after.startedAt)) {
+      openSession(after, after.startedAt!);
+    }
     const dbPatch = taskDbDiff(before, after);
     if (!Object.keys(dbPatch).length) return;
     patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
       .then(error => { if (error) console.error(`${context} error:`, error); });
-  }, [logCompletion, unlogCompletion]);
+  }, [logCompletion, unlogCompletion, openSession, closeSession]);
 
   /** Apply a change to a task and put it on the undo stack under `label`. */
   const changeTask = useCallback((id: string, patch: Partial<Task>, label: string, context: string) => {
@@ -931,11 +1071,14 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       // Logged now rather than optimistically, so the row carries the real
       // task id and reopening the task can find its completion again.
       if (real.status === 'done') logCompletion(real, real.completedAt ?? new Date().toISOString());
+      // Started straight from the form — same reason as the completion above,
+      // the session needs the real id so pausing can find its open stint.
+      if (real.startedAt) openSession(real, real.startedAt);
       tasksRef.current = tasksRef.current.map(t => t.id === optimisticId ? real : t);
       // Realtime may have delivered the INSERT first; don't list it twice.
       setTasks(ts => ts.filter(t => t.id !== real.id).map(t => t.id === optimisticId ? real : t));
     });
-  }, [record, archiveTask, restoreTask, logCompletion]);
+  }, [record, archiveTask, restoreTask, logCompletion, openSession]);
 
   const updateTask = useCallback((id: string, raw: Partial<Task>) => {
     const before = tasksRef.current.find(t => t.id === id);
@@ -1255,7 +1398,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
 
   const api: DashboardApi = {
     tasks, setTasks, habits, setHabits, journal, setJournal,
-    projects, setProjects, goals, completions, doneByDay, modal, setModal,
+    projects, setProjects, goals, completions, doneByDay, sessions, modal, setModal,
     toggleTask, starTask, toggleTaskProgress, toggleHabit, reorderTasks,
     addTask, updateTask, removeTask, addJournal,
     addHabit, updateHabit, removeHabit,

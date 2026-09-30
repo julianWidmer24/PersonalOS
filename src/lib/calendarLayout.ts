@@ -2,8 +2,19 @@ import type { CalendarEvent } from '../types';
 
 const EPS = 1e-6;
 
-export interface PositionedEvent {
-  event: CalendarEvent;
+/**
+ * The only thing the packer needs: an id and a span in fractional hours.
+ * Calendar events satisfy it, and so do tracked-time sessions — which is the
+ * point, since two tasks running at once overlap exactly like two meetings do.
+ */
+export interface TimeSpan {
+  id: string;
+  start: number;
+  end: number;
+}
+
+export interface Positioned<T extends TimeSpan> {
+  event: T;
   /** 0..1 fraction of the day column */
   left: number;
   /** 0..1 fraction of the day column */
@@ -14,14 +25,16 @@ export interface PositionedEvent {
   z: number;
 }
 
-function overlaps(a: CalendarEvent, b: CalendarEvent) {
+export type PositionedEvent = Positioned<CalendarEvent>;
+
+function overlaps(a: TimeSpan, b: TimeSpan) {
   return a.start < b.end - EPS && b.start < a.end - EPS;
 }
 
 // Google-Calendar-style packing: events that overlap in time are split into
 // side-by-side columns, then each one expands rightwards into any column that
 // stays free for its whole duration. Non-overlapping events keep full width.
-function packCluster(cluster: CalendarEvent[]): PositionedEvent[] {
+function packCluster<T extends TimeSpan>(cluster: T[]): Positioned<T>[] {
   const colEnds: number[] = [];
   const colOf: number[] = [];
 
@@ -58,13 +71,13 @@ function packCluster(cluster: CalendarEvent[]): PositionedEvent[] {
 }
 
 /** Positions one day's events, resolving overlaps into columns. */
-export function layoutDay(events: CalendarEvent[]): PositionedEvent[] {
+export function layoutDay<T extends TimeSpan>(events: T[]): Positioned<T>[] {
   const sorted = [...events]
     .map(e => (e.end > e.start ? e : { ...e, end: e.start + 0.25 }))
     .sort((a, b) => a.start - b.start || b.end - a.end);
 
-  const out: PositionedEvent[] = [];
-  let cluster: CalendarEvent[] = [];
+  const out: Positioned<T>[] = [];
+  let cluster: T[] = [];
   let clusterEnd = -Infinity;
 
   const flush = () => {
@@ -83,7 +96,7 @@ export function layoutDay(events: CalendarEvent[]): PositionedEvent[] {
 }
 
 /** Visible hour window: fits the events on screen instead of clipping them. */
-export function hourWindow(events: CalendarEvent[], fallback: [number, number] = [8, 21]) {
+export function hourWindow(events: TimeSpan[], fallback: [number, number] = [8, 21]) {
   if (!events.length) return fallback;
   const min = Math.min(...events.map(e => e.start));
   const max = Math.max(...events.map(e => e.end));

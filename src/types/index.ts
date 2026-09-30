@@ -49,6 +49,28 @@ export interface TaskCompletion {
   completedAt: string;
 }
 
+/**
+ * One stint at a task — the stopwatch running from `startedAt` until
+ * `endedAt`, or still running when that's null. Unlike `Task.timeSpentMs`,
+ * which is only a total, this remembers *when*, which is what the tracked-time
+ * calendar draws. Survives the task's own expiry, like [[TaskCompletion]] —
+ * see supabase/migrations/015_task_sessions.sql.
+ */
+export interface TaskSession {
+  id: string;
+  /** The task worked on, or null once that row has been purged. */
+  taskId: string | null;
+  title: string;
+  /** The task's tag when the stint ran — the colour falls back to this. */
+  tag: TaskTag;
+  /** The project the block is coloured by, when there is one. */
+  projectId: string | null;
+  /** ISO timestamp the stint began. */
+  startedAt: string;
+  /** ISO timestamp it stopped; null while it's still running. */
+  endedAt: string | null;
+}
+
 export type ProjectStatus = 'active' | 'paused' | 'done';
 
 export interface Project {

@@ -73,6 +73,15 @@ function fromHex(hex: string): KindColor | null {
 }
 
 /**
+ * A block colour built from any hex — a project's swatch, or the hue a task
+ * tag is drawn in. Runs through the same lift + cache as a Google calendar
+ * colour, so a project block and an event block carry the same weight.
+ */
+export function colorFromHex(hex: string): KindColor {
+  return fromHex(hex) ?? colorForKind('work');
+}
+
+/**
  * An event's colour: its Google calendar's colour where there is one, so two
  * calendars never render alike, falling back to the event-kind palette for
  * locally-derived events.
