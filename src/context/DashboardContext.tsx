@@ -1,27 +1,19 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import type { Task, Project, Habit, JournalEntry, Goal, ModalState } from '../types';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import type { Task, Project, Habit, JournalEntry, Goal, ModalState, TaskCompletion } from '../types';
 import { supabase } from '../lib/supabase';
 import { celebrate } from '../lib/celebrate';
 import { taskElapsedMs } from '../lib/dashboardHelpers';
+import { addDays, countsByDay, dateKey, todayKey } from '../lib/taskStats';
 
 // Pure helpers (fmt, TAG_COLORS, PRIORITY_COLORS, useClock) now live in
 // ../lib/dashboardHelpers so this file only exports components + its hook.
 
 // ── Date helpers ──────────────────────────────────────────────
-// Local-date key (YYYY-MM-DD). Deliberately not toISOString(): that converts to
-// UTC first, so an evening check-in west of UTC — or a pre-dawn one east of it —
-// lands on the neighbouring day's key and silently breaks the streak.
-function dateStr(d: Date) {
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
-}
-const todayStr = () => dateStr(new Date());
-function daysAgoStr(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return dateStr(d);
-}
+// Local-date keys (YYYY-MM-DD) come from lib/taskStats — deliberately not
+// toISOString(), which converts to UTC first, so an evening check-in west of
+// UTC (or a pre-dawn one east of it) lands on the neighbouring day's key and
+// silently breaks the streak.
+const daysAgoStr = (n: number) => dateKey(addDays(new Date(), -n));
 
 // ── Tasks: Supabase ↔ frontend mappers ────────────────────────
 function priorityFromScore(score: number): Task['priority'] {
@@ -135,6 +127,7 @@ function rowToTask(row: any): Task {
     isStarred: row.starred ?? false,
     startedAt: row.started_at ? String(row.started_at) : null,
     timeSpentMs: Number(row.time_spent_ms ?? 0) || 0,
+    completedAt: row.completed_at ? String(row.completed_at) : null,
   };
 }
 
@@ -144,16 +137,36 @@ function taskDbDiff(before: Task, after: Task): Record<string, unknown> {
   if (after.title !== before.title) db.title = after.title;
   if (after.tag !== before.tag) db.category = tagToCategory(after.tag);
   if (after.priority !== before.priority) db.priority = priorityToScore(after.priority);
-  if (after.status !== before.status) {
-    db.status = STATUS_TO_DB[after.status] ?? after.status;
-    db.completed_at = after.status === 'done' ? new Date().toISOString() : null;
-  }
+  if (after.status !== before.status) db.status = STATUS_TO_DB[after.status] ?? after.status;
+  // The stamp rides on the task rather than being derived here, so an undo
+  // restores the original moment instead of inventing a new one.
+  if ((after.completedAt ?? null) !== (before.completedAt ?? null)) db.completed_at = after.completedAt ?? null;
   if (!!after.isStarred !== !!before.isStarred) db.starred = !!after.isStarred;
   if (after.due !== before.due) db.due_date = toDueDate(after.due);
   if (after.projectId !== before.projectId) db.project_id = after.projectId;
   if ((after.startedAt ?? null) !== (before.startedAt ?? null)) db.started_at = after.startedAt ?? null;
   if ((after.timeSpentMs ?? 0) !== (before.timeSpentMs ?? 0)) db.time_spent_ms = Math.round(after.timeSpentMs ?? 0);
   return db;
+}
+
+// ── Completion log ────────────────────────────────────────────
+// Done tasks are hard-deleted a day later, so the history the distribution
+// chart plots lives in its own table (migration 014). Rows survive the purge;
+// `task_id` goes null and the copied title/category keep the row meaningful.
+
+/** How far back completions are loaded — one year of weekly bars, plus slack. */
+const COMPLETION_HISTORY_DAYS = 400;
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function rowToCompletion(row: any): TaskCompletion {
+  return {
+    id:          row.id,
+    taskId:      row.task_id ?? null,
+    title:       row.title ?? '',
+    tag:         tagFromCategory(row.category),
+    date:        String(row.completed_date),
+    completedAt: String(row.completed_at ?? row.created_at ?? ''),
+  };
 }
 
 /** A task's clock stopped now, with the running stint banked into its total. */
@@ -199,7 +212,7 @@ function deriveHabit(habitRow: any, completionsForHabit: any[]): Habit {
   // streak: consecutive completed days back from today. Today counts only once
   // it's actually checked — but an unchecked today is still in progress, so it
   // doesn't break the run; we start counting at yesterday instead.
-  const doneToday = completedDays.has(todayStr());
+  const doneToday = completedDays.has(todayKey());
   let streak = 0;
   for (let i = doneToday ? 0 : 1; i < COMPLETION_WINDOW_DAYS; i++) {
     if (completedDays.has(daysAgoStr(i))) streak++;
@@ -248,7 +261,7 @@ function moodFromScore(score: number | null | undefined): string {
 function rowToJournal(row: any): JournalEntry {
   return {
     id:      row.id,
-    date:    String(row.entry_date ?? todayStr()),
+    date:    String(row.entry_date ?? todayKey()),
     mood:    moodFromScore(row.mood_score),
     excerpt: row.summary ?? row.transcript ?? '',
   };
@@ -278,6 +291,14 @@ interface DashboardApi {
   projects: Project[];
   setProjects: React.Dispatch<React.SetStateAction<Project[]>>;
   goals: Goal[];
+  /** Every task finished in the last year or so, newest first. */
+  completions: TaskCompletion[];
+  /**
+   * How many tasks were finished on each local day, keyed YYYY-MM-DD. Merges
+   * the completion log with tasks still in the done bucket, so today's count
+   * is right even before migration 014 is applied.
+   */
+  doneByDay: Map<string, number>;
   modal: ModalState;
   setModal: (m: ModalState) => void;
 
@@ -323,6 +344,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const [journal, setJournal]   = useState<JournalEntry[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [goals, setGoals]       = useState<Goal[]>([]);
+  const [completions, setCompletions] = useState<TaskCompletion[]>([]);
   const [modal, setModal]       = useState<ModalState>(null);
 
   // Cached user_id for inserts (RLS check requires explicit user_id)
@@ -337,6 +359,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const taskIdAliasRef = useRef(new Map<string, string>());
   // Optimistic tasks whose add was undone before the insert came back.
   const cancelledAddsRef = useRef(new Set<string>());
+  // Latest completions, readable from a callback without re-creating it.
+  const completionsRef = useRef<TaskCompletion[]>([]);
+  // Optimistic completions un-logged before their insert came back; the real
+  // row is deleted the moment the insert hands us its id.
+  const cancelledCompletionsRef = useRef(new Set<string>());
 
   // Undo/redo stacks. Entries close over ids and field snapshots, never over
   // state, so replaying one always acts on the latest version of the data.
@@ -622,9 +649,108 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
+  // ── Load the completion log + realtime ────────────────────
+  // Nothing here is load-bearing for using the app: on a database without
+  // migration 014 the fetch errors once, the list stays empty, and today's
+  // count falls back to the done tasks still on the board.
+  useEffect(() => {
+    const since = dateKey(addDays(new Date(), -COMPLETION_HISTORY_DAYS));
+
+    supabase
+      .from('task_completions')
+      .select('*')
+      .gte('completed_date', since)
+      .order('completed_at', { ascending: false })
+      .then(({ data, error }) => {
+        if (error) { console.error('task_completions fetch error:', error); return; }
+        const rows = (data ?? []).map(rowToCompletion);
+        completionsRef.current = rows;
+        setCompletions(rows);
+      });
+
+    const upsert = (row: TaskCompletion) => setCompletions(cs =>
+      cs.some(c => c.id === row.id) ? cs.map(c => c.id === row.id ? row : c) : [row, ...cs]);
+
+    const channel = supabase
+      .channel('task-completions-changes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'task_completions' },
+        (payload) => upsert(rowToCompletion(payload.new)))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'task_completions' },
+        (payload) => upsert(rowToCompletion(payload.new)))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'task_completions' },
+        (payload) => setCompletions(cs => cs.filter(c => c.id !== payload.old.id)))
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => { completionsRef.current = completions; }, [completions]);
+
   useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   // ── Task mutations ────────────────────────────────────────
+  // Write a finished task into the completion log. The row is added locally
+  // first so the counter moves on the click, not on the round trip.
+  const logCompletion = useCallback((task: Task, at: string) => {
+    const when = new Date(at);
+    const tempId = 'tmp-completion-' + Math.random().toString(36).slice(2, 10);
+    // A task finished before its own insert returned has no real id yet; log it
+    // without one so the day's count is still right (countsByDay de-duplicates
+    // it against the done task itself).
+    const taskId = task.id.startsWith('tmp-task-') ? null : task.id;
+    const optimistic: TaskCompletion = {
+      id: tempId, taskId, title: task.title, tag: task.tag,
+      date: dateKey(when), completedAt: at,
+    };
+    completionsRef.current = [optimistic, ...completionsRef.current];
+    setCompletions(cs => [optimistic, ...cs]);
+
+    supabase.from('task_completions').insert({
+      user_id:        userIdRef.current,
+      task_id:        taskId,
+      title:          task.title,
+      category:       tagToCategory(task.tag),
+      completed_date: optimistic.date,
+      completed_at:   at,
+    }).select().single().then(({ data: row, error }) => {
+      // Drop the placeholder either way. On success the real row replaces it;
+      // on failure — no migration 014, or a second check-off the same day the
+      // unique index rejects — the done task itself still carries the count.
+      setCompletions(cs => {
+        const rest = cs.filter(c => c.id !== tempId);
+        return error ? rest : [rowToCompletion(row), ...rest.filter(c => c.id !== row.id)];
+      });
+      if (error) {
+        cancelledCompletionsRef.current.delete(tempId);
+        console.error('logCompletion error:', error);
+        return;
+      }
+      // Un-logged while the insert was in flight — take the real row back out.
+      if (cancelledCompletionsRef.current.delete(tempId)) {
+        setCompletions(cs => cs.filter(c => c.id !== row.id));
+        supabase.from('task_completions').delete().eq('id', row.id).then(({ error: e }) => {
+          if (e) console.error('unlogCompletion error:', e);
+        });
+      }
+    });
+  }, []);
+
+  /** Reopening a task takes its most recent completion back off the log. */
+  const unlogCompletion = useCallback((taskId: string) => {
+    const mine = completionsRef.current.filter(c => c.taskId === taskId);
+    if (!mine.length) return;
+    const latest = mine.reduce((a, b) => (a.completedAt >= b.completedAt ? a : b));
+    completionsRef.current = completionsRef.current.filter(c => c.id !== latest.id);
+    setCompletions(cs => cs.filter(c => c.id !== latest.id));
+    if (latest.id.startsWith('tmp-completion-')) {
+      cancelledCompletionsRef.current.add(latest.id); // insert still in flight
+      return;
+    }
+    supabase.from('task_completions').delete().eq('id', latest.id).then(({ error }) => {
+      if (error) console.error('unlogCompletion error:', error);
+    });
+  }, []);
+
   // Every task edit funnels through here: merge the fields into the latest copy
   // of the task, then persist only the columns that actually changed. Side
   // effects stay out of setTasks updaters, which StrictMode runs twice.
@@ -632,14 +758,28 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     const id = taskIdAliasRef.current.get(rawId) ?? rawId;
     const before = tasksRef.current.find(t => t.id === id);
     if (!before) return;
-    const after = { ...before, ...fields };
+    // Crossing into or out of done moves the completion stamp with it, unless
+    // the caller set one itself — so an undo restores the original moment.
+    const merged = { ...before, ...fields };
+    const crossed = merged.status !== before.status &&
+      (merged.status === 'done' || before.status === 'done');
+    const next: Partial<Task> = crossed && fields.completedAt === undefined
+      ? { ...fields, completedAt: merged.status === 'done' ? new Date().toISOString() : null }
+      : fields;
+    const after = { ...before, ...next };
     tasksRef.current = tasksRef.current.map(t => t.id === id ? after : t);
-    setTasks(ts => ts.map(t => t.id === id ? { ...t, ...fields } : t));
+    setTasks(ts => ts.map(t => t.id === id ? { ...t, ...next } : t));
+    // Every path that finishes or reopens a task funnels through here — toggle,
+    // edit, drag between columns, undo, redo — so the log is written once, here.
+    if (crossed) {
+      if (after.status === 'done') logCompletion(after, after.completedAt ?? new Date().toISOString());
+      else unlogCompletion(id);
+    }
     const dbPatch = taskDbDiff(before, after);
     if (!Object.keys(dbPatch).length) return;
     patchTaskRow(id, { ...dbPatch, updated_at: new Date().toISOString() })
       .then(error => { if (error) console.error(`${context} error:`, error); });
-  }, []);
+  }, [logCompletion, unlogCompletion]);
 
   /** Apply a change to a task and put it on the undo stack under `label`. */
   const changeTask = useCallback((id: string, patch: Partial<Task>, label: string, context: string) => {
@@ -724,6 +864,11 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       title: '', isStarred: false,
       ...data,
     };
+    // The form can create a task that's already done. Stamp it here so it ages
+    // out like any other and lands in the completion log below.
+    if (optimistic.status === 'done' && !optimistic.completedAt) {
+      optimistic.completedAt = new Date().toISOString();
+    }
     tasksRef.current = [optimistic, ...tasksRef.current];
     setTasks(ts => [optimistic, ...ts]);
     record({
@@ -768,16 +913,29 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       // The insert leaves the optional stopwatch columns out (a DB without them
       // would reject the whole row), so a task started from the form gets its
       // clock written as a follow-up patch.
-      const clockPatch = taskDbDiff(rowToTask(row), { ...rowToTask(row), startedAt: optimistic.startedAt, timeSpentMs: optimistic.timeSpentMs });
+      const clockPatch = taskDbDiff(rowToTask(row), {
+        ...rowToTask(row),
+        startedAt: optimistic.startedAt,
+        timeSpentMs: optimistic.timeSpentMs,
+        completedAt: optimistic.completedAt,
+      });
       if (Object.keys(clockPatch).length) {
         patchTaskRow(row.id, clockPatch).then(e => { if (e) console.error('addTask clock error:', e); });
       }
-      const real = { ...rowToTask(row), startedAt: optimistic.startedAt ?? null, timeSpentMs: optimistic.timeSpentMs ?? 0 };
+      const real = {
+        ...rowToTask(row),
+        startedAt: optimistic.startedAt ?? null,
+        timeSpentMs: optimistic.timeSpentMs ?? 0,
+        completedAt: optimistic.completedAt ?? null,
+      };
+      // Logged now rather than optimistically, so the row carries the real
+      // task id and reopening the task can find its completion again.
+      if (real.status === 'done') logCompletion(real, real.completedAt ?? new Date().toISOString());
       tasksRef.current = tasksRef.current.map(t => t.id === optimisticId ? real : t);
       // Realtime may have delivered the INSERT first; don't list it twice.
       setTasks(ts => ts.filter(t => t.id !== real.id).map(t => t.id === optimisticId ? real : t));
     });
-  }, [record, archiveTask, restoreTask]);
+  }, [record, archiveTask, restoreTask, logCompletion]);
 
   const updateTask = useCallback((id: string, raw: Partial<Task>) => {
     const before = tasksRef.current.find(t => t.id === id);
@@ -809,7 +967,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
 
   // ── Habit mutations ───────────────────────────────────────
   const toggleHabitRaw = useCallback((id: string) => {
-    const today = todayStr();
+    const today = todayKey();
     const existing = completionRowsRef.current.find(
       c => c.habit_id === id && String(c.completed_date) === today,
     );
@@ -856,7 +1014,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const toggleHabit = useCallback((id: string) => {
     const habit = habitRowsRef.current.find(h => h.id === id);
     const doneToday = completionRowsRef.current.some(
-      c => c.habit_id === id && String(c.completed_date) === todayStr() && c.fully_completed,
+      c => c.habit_id === id && String(c.completed_date) === todayKey() && c.fully_completed,
     );
     toggleHabitRaw(id);
     const name = habit?.name ?? 'habit';
@@ -926,7 +1084,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   const addJournal = useCallback(async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    const today = todayStr();
+    const today = todayKey();
     const { data: existing, error: selErr } = await supabase
       .from('journal_entries')
       .select('id, transcript')
@@ -1091,9 +1249,13 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
       g.isComplete ? `Reopened “${g.title}”` : `Completed “${g.title}”`);
   }, [updateGoal]);
 
+  // Recomputed only when a task or a completion moves — the KPI counter and the
+  // distribution chart both read it, so it's derived once here.
+  const doneByDay = useMemo(() => countsByDay(completions, tasks), [completions, tasks]);
+
   const api: DashboardApi = {
     tasks, setTasks, habits, setHabits, journal, setJournal,
-    projects, setProjects, goals, modal, setModal,
+    projects, setProjects, goals, completions, doneByDay, modal, setModal,
     toggleTask, starTask, toggleTaskProgress, toggleHabit, reorderTasks,
     addTask, updateTask, removeTask, addJournal,
     addHabit, updateHabit, removeHabit,

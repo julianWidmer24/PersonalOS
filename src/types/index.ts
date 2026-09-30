@@ -23,6 +23,30 @@ export interface Task {
    * segment here, so the total is this plus (now − startedAt) while running.
    */
   timeSpentMs?: number;
+  /**
+   * ISO timestamp of the moment the task was marked done; null when it isn't.
+   * The done-task expiry clock reads this, and it is the fallback source for
+   * today's completed count on a database without `task_completions`.
+   */
+  completedAt?: string | null;
+}
+
+/**
+ * One finished task, logged when it's checked off and kept after the task row
+ * itself expires — so the completion history outlives the board. See
+ * supabase/migrations/014_task_completions.sql.
+ */
+export interface TaskCompletion {
+  id: string;
+  /** The task that was finished, or null once that row has been purged. */
+  taskId: string | null;
+  title: string;
+  /** The task's tag at the moment it was finished. */
+  tag: TaskTag;
+  /** Local date it was finished on, YYYY-MM-DD. */
+  date: string;
+  /** ISO timestamp of the exact moment. */
+  completedAt: string;
 }
 
 export type ProjectStatus = 'active' | 'paused' | 'done';

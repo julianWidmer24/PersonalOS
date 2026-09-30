@@ -6,6 +6,7 @@ import { InProgress } from '../components/InProgress';
 import { NextEvent } from '../components/NextEvent';
 import { Projects } from '../components/Projects';
 import { TaskCRM } from '../components/TaskCRM';
+import { TaskCompletions } from '../components/TaskCompletions';
 import { Calendar } from '../components/Calendar';
 import { Habits } from '../components/Habits';
 import { Goals } from '../components/Goals';
@@ -40,6 +41,7 @@ export function DashboardPage() {
         <Widget key="next-event" id="next-event"><NextEvent /></Widget>
         <Widget key="projects" id="projects"><Projects /></Widget>
         <Widget key="task-crm" id="task-crm"><TaskCRM /></Widget>
+        <Widget key="task-completions" id="task-completions"><TaskCompletions /></Widget>
         <Widget key="calendar" id="calendar"><Calendar /></Widget>
         <Widget key="habits" id="habits"><Habits /></Widget>
         <Widget key="goals" id="goals"><Goals /></Widget>

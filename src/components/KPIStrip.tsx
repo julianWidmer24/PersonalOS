@@ -1,17 +1,23 @@
 import { useDashboard } from '../context/DashboardContext';
 import { useWorkoutToday } from '../hooks/usePhysical';
+import { useTodayKey } from '../lib/taskStats';
 
 interface KPIProps {
   label: string;
   value: string | number;
   hint?: string;
   accent?: string;
+  /** Sits opposite the label, for a second number that belongs in this box. */
+  badge?: React.ReactNode;
 }
 
-function KPI({ label, value, hint, accent }: KPIProps) {
+function KPI({ label, value, hint, accent, badge }: KPIProps) {
   return (
     <div className="flex-1 px-5 py-4 border-r border-[var(--line)] last:border-r-0">
-      <div className="text-[10.5px] uppercase tracking-[0.14em] text-[var(--t3)]">{label}</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[10.5px] uppercase tracking-[0.14em] text-[var(--t3)]">{label}</div>
+        {badge}
+      </div>
       <div className="mt-2 flex items-baseline gap-2">
         <span className="text-[28px] font-medium tracking-[-0.02em] tnum" style={{ color: accent || 'var(--t1)' }}>
           {value}
@@ -45,14 +51,21 @@ function WorkoutKPI({ w }: { w: ReturnType<typeof useWorkoutToday> }) {
 }
 
 export function KPIStrip() {
-  const { tasks, habits } = useDashboard();
+  const { tasks, habits, doneByDay } = useDashboard();
   const openTasks = tasks.filter(t => t.status !== 'done').length;
   const habitDone = habits.filter(h => h.done).length;
   const workout = useWorkoutToday();
+  // Keyed off the local day, so the tally clears itself at midnight rather
+  // than carrying yesterday's number into the morning.
+  const today = useTodayKey();
+  const doneToday = doneByDay.get(today) ?? 0;
 
   return (
     <div className="flex rounded-xl border border-[var(--line)] bg-[var(--bg-card)] overflow-hidden">
       <KPI label="Open tasks" value={openTasks}
+        badge={doneToday > 0
+          ? <span className="text-[9.5px] tnum whitespace-nowrap" style={{ color: 'var(--green)' }}>✓ {doneToday} done today</span>
+          : undefined}
         hint={`${tasks.filter(t => t.priority === 'P0' && t.status !== 'done').length} P0 today`} />
       <KPI label="Habits" value={habits.length > 0 ? `${habitDone}/${habits.length}` : '—'} hint="today" />
       <WorkoutKPI w={workout} />
