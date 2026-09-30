@@ -61,6 +61,7 @@ idempotent and non-destructive:
 - `009_workout_day_overrides.sql` (per-day workout edits)
 - `010_academic_plans.sql`       (Academics course planner sync)
 - `014_task_completions.sql`     (completed-tasks counter + distribution chart)
+- `015_task_sessions.sql`        (tracked-time calendar)
 
 ⚠️ Never run `supabase db push` — your live schema has drifted from the older
 migrations and a push would try to force conflicting shapes.

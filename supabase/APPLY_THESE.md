@@ -217,6 +217,48 @@ After running, test:
    purged, and its completion row survives with `task_id` now NULL. It still
    counts in the **Month** and **Year** views.
 
+## 10. `015_task_sessions.sql` — applied in full 2026-09-29 ✅
+Creates `task_sessions`: one row per stint at the stopwatch, `started_at` to
+`ended_at`, with an open row (NULL `ended_at`) while a task is running.
+
+It exists because `time_spent_ms` is a **total, not a placement**. A task worked
+8:00–10:23pm persisted as `time_spent_ms = 8580000` and nothing else — the
+duration survived, the *when* was gone, and three stints in a day collapsed into
+one number. The tracked-time calendar needs intervals, so they get their own
+rows.
+
+Deliberately overlap-friendly: two tasks running at once is a supported state,
+so nothing constrains one open session per user. The partial unique index only
+stops the *same task* opening twice, which is a double-click, not a workflow.
+
+Like 014, a session outlives its task — `task_id` is `on delete set null` and
+title/category/project_id are copied onto the row, so a block keeps its label
+and colour after the daily purge. `project_id` is also `set null`, so deleting a
+project never deletes the hours you put into it.
+
+Applied via `supabase db query --linked -f supabase/migrations/015_task_sessions.sql`.
+The backfill gave the one task whose stopwatch was running an open session.
+**Banked `time_spent_ms` could not be recovered** — no timestamps were ever
+written for it — so the 15 tasks carrying past time show nothing on the
+calendar, and it fills from the next ▶ onward.
+
+Same offline-first fallback as 014: before you run it the stopwatch still works
+and still banks time, the session writes just fail quietly and the calendar
+stays empty.
+
+After running, test:
+1. Hit ▶ on a task → `task_sessions` gains a row with a NULL `ended_at`, and a
+   live block appears on **Calendar → Time tracked** growing toward now.
+2. Pause it → `ended_at` is set and the block stops growing.
+3. Start two tasks at once → two rows open, and the blocks render side by side
+   in the same slot rather than on top of each other.
+4. Start one and pause within 30s → the row is deleted, not closed
+   (`MIN_SESSION_MS`), so a misclick leaves no mark.
+5. Start before midnight and pause after → one row, drawn as two blocks with
+   squared-off edges where it crosses the day boundary.
+6. Mark a running task done → its stint closes; the task expires a day later and
+   the block stays, with `task_id` now NULL.
+
 ## Not migrating (intentionally staying local)
 - `MealPlan` and `Settings` localStorage: meal-plan template + UI prefs. Fine to
   keep device-local.
