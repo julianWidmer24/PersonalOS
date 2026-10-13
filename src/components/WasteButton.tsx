@@ -59,7 +59,7 @@ export function WasteButton() {
       <button
         onClick={stopWasting}
         title="Stop the waste timer"
-        className="waste-alarm flex items-center gap-2 h-8 pl-2.5 pr-3 rounded-md bg-[var(--red)] text-[var(--bg)] font-semibold text-[11.5px] tnum shrink-0"
+        className="waste-alarm flex items-center gap-2 h-8 pl-2.5 pr-3 rounded-md bg-red text-bg font-semibold text-ui tnum shrink-0"
       >
         <Hourglass />
         <span>{fmtClock(elapsed)}</span>
@@ -72,14 +72,14 @@ export function WasteButton() {
     <button
       onClick={startWasting}
       title={`Starts a timer of time you're wasting. Lost today: ${fmtLost(lost)}`}
-      className="group flex items-center gap-2 h-8 pl-2.5 pr-3 rounded-md border-2 border-[var(--red)] text-[var(--red)] text-[11.5px] font-semibold uppercase tracking-[0.1em] shrink-0 transition-[filter,transform] hover:brightness-125 active:scale-95"
+      className="group flex items-center gap-2 h-8 pl-2.5 pr-3 rounded-md border-2 border-red text-red text-ui font-semibold uppercase tracking-caps shrink-0 transition-[filter,transform] hover:brightness-125 active:scale-95"
       style={{ background: HAZARD }}
     >
       <Hourglass />
       <span className="hidden sm:inline">I'm wasting time</span>
       <span className="sm:hidden">Wasting</span>
       {lost >= 60_000 && (
-        <span className="hidden lg:inline normal-case tracking-normal font-medium text-[var(--red)]/70 tnum">
+        <span className="hidden lg:inline normal-case tracking-normal font-medium text-red/70 tnum">
           · {fmtLost(lost)} lost today
         </span>
       )}
@@ -108,17 +108,17 @@ export function WasteBanner() {
   const lost = wastedTodayMs(sessions, now);
 
   return (
-    <div className="sticky top-12 z-20 border-b-2 border-[var(--red)] text-[var(--red)]" style={{ background: HAZARD }}>
-      <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2.5 flex items-center gap-3 flex-wrap bg-[var(--bg)]/70">
-        <span className="waste-dot w-2.5 h-2.5 rounded-full bg-[var(--red)] shrink-0" />
+    <div className="sticky top-12 z-20 border-b-2 border-red text-red" style={{ background: HAZARD }}>
+      <div className="max-w-[1600px] mx-auto px-4 md:px-6 py-2.5 flex items-center gap-3 flex-wrap bg-bg/70">
+        <span className="waste-dot w-2.5 h-2.5 rounded-full bg-red shrink-0" />
         <div className="flex items-baseline gap-2 flex-wrap min-w-0">
-          <span className="text-[14px] font-semibold uppercase tracking-[0.1em]">You're wasting time</span>
-          <span className="text-[19px] font-semibold tnum">{fmtClock(elapsed)}</span>
-          <span className="text-[11.5px] text-[var(--red)]/70 tnum">{fmtLost(lost)} gone today. You won't get it back.</span>
+          <span className="text-title font-semibold uppercase tracking-caps">You're wasting time</span>
+          <span className="text-xl font-semibold tnum">{fmtClock(elapsed)}</span>
+          <span className="text-ui text-red/70 tnum">{fmtLost(lost)} gone today. You won't get it back.</span>
         </div>
         <button
           onClick={stopWasting}
-          className="ml-auto px-3.5 py-1.5 rounded-md bg-[var(--red)] text-[var(--bg)] text-[11.5px] font-semibold hover:brightness-110 active:scale-95 transition"
+          className="ml-auto px-3.5 py-1.5 rounded-md bg-red text-bg text-ui font-semibold hover:brightness-110 active:scale-95 transition"
         >
           Stop — back to work
         </button>

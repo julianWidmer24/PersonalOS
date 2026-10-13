@@ -88,10 +88,10 @@ function Block({ block: b, left, width, crowded, z, startH, hourPx, color, onOpe
             style={{ background: color.dot }}
           />
         )}
-        <span className="text-[9.5px] leading-[1.15] text-[var(--t1)] truncate">{b.title}</span>
+        <span className="text-micro leading-[1.15] text-ink truncate">{b.title}</span>
       </div>
       {h >= 30 && (
-        <div className="text-[9px] leading-tight text-[var(--t3)] truncate tnum">
+        <div className="text-micro leading-tight text-ink-3 truncate tnum">
           {fmtDuration(b.end - b.start)}
           {width > 0.45 ? ` · ${fmtHour(b.start)}` : ''}
         </div>
@@ -199,49 +199,49 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
       {/* Range and its navigation belong together, and here they can wrap. */}
       <div className="mb-2 flex items-center flex-wrap gap-x-2 gap-y-1">
         <button onClick={() => shift(-1)} aria-label="Previous"
-          className="w-5 h-5 shrink-0 grid place-items-center rounded-md text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--bg-card-hi)] transition-colors">‹</button>
+          className="w-5 h-5 shrink-0 grid place-items-center rounded-md text-ink-3 hover:text-ink hover:bg-card-hi transition-colors">‹</button>
         <button onClick={() => shift(1)} aria-label="Next"
-          className="w-5 h-5 shrink-0 grid place-items-center rounded-md text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--bg-card-hi)] transition-colors">›</button>
-        <span className="text-[10.5px] text-[var(--t3)] tnum">{rangeLabel}</span>
+          className="w-5 h-5 shrink-0 grid place-items-center rounded-md text-ink-3 hover:text-ink hover:bg-card-hi transition-colors">›</button>
+        <span className="text-meta text-ink-3 tnum">{rangeLabel}</span>
         {!isCurrent && (
           <button
             onClick={() => setAnchorMs(startOfDay(new Date()).getTime())}
-            className="px-2 py-0.5 rounded-md border border-[var(--line)] text-[10px] text-[var(--t3)] hover:text-[var(--t1)] transition-colors"
+            className="px-2 py-0.5 rounded-md border border-line text-meta text-ink-3 hover:text-ink transition-colors"
           >
             Today
           </button>
         )}
         <button
           onClick={logNow}
-          className="ml-auto px-2 py-0.5 rounded-md border border-[var(--line)] text-[10px] text-[var(--t3)] hover:text-[var(--t1)] transition-colors"
+          className="ml-auto px-2 py-0.5 rounded-md border border-line text-meta text-ink-3 hover:text-ink transition-colors"
         >
           + Log time
         </button>
       </div>
 
       <div className="flex flex-col">
-        <div className="grid text-[10.5px] text-[var(--t3)] pb-1.5 border-b border-[var(--line)]"
+        <div className="grid text-meta text-ink-3 pb-1.5 border-b border-line"
           style={{ gridTemplateColumns: cols }}>
           <div />
           {days.map((d, i) => {
             const isToday = dateKey(d) === todayKeyStr;
             return (
               <div key={dateKey(d)} className="px-1 text-center">
-                <div className={`tnum ${isToday ? 'text-[var(--t1)] font-medium' : ''}`}>
+                <div className={`tnum ${isToday ? 'text-ink font-medium' : ''}`}>
                   {days.length === 1 ? d.toLocaleDateString([], { weekday: 'short' }) : DOW[i]}
                 </div>
                 <div className={`tnum ${isToday
-                  ? 'text-[var(--bg)] bg-[var(--accent)] rounded-full w-[18px] h-[18px] leading-[18px] mx-auto mt-0.5'
+                  ? 'text-[var(--bg)] bg-accent rounded-full w-[18px] h-[18px] leading-[18px] mx-auto mt-0.5'
                   : 'mt-0.5'}`}>
                   {d.getDate()}
                 </div>
                 {/* The day's total, so the week reads as a bar chart of effort
                     as well as a calendar. */}
-                <div className="mt-0.5 text-[9px] tnum text-[var(--t4)]">
+                <div className="mt-0.5 text-micro tnum text-ink-4">
                   {perDay[i] > 0 ? fmtDuration(perDay[i]) : '·'}
                 </div>
                 {wastePerDay[i] > 0 && (
-                  <div className="text-[9px] tnum text-[var(--red)]" title="Wasted">
+                  <div className="text-micro tnum text-red" title="Wasted">
                     −{fmtDuration(wastePerDay[i])}
                   </div>
                 )}
@@ -254,7 +254,7 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
           <div>
             {hours.map(h => (
               <div key={h} style={{ height: hourPx }}
-                className="text-[9.5px] text-[var(--t4)] pr-1.5 text-right tnum -translate-y-1">
+                className="text-micro text-ink-4 pr-1.5 text-right tnum -translate-y-1">
                 {fmtHour(h)}
               </div>
             ))}
@@ -266,10 +266,10 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
               <div key={dateKey(d)}
                 onClick={e => onColumnClick(e, d)}
                 title="Click to log time here"
-                className={`relative border-l border-[var(--line)]/60 cursor-copy ${isToday ? 'bg-[var(--accent-2)]/40' : ''}`}>
+                className={`relative border-l border-line/60 cursor-copy ${isToday ? 'bg-accent-soft/40' : ''}`}>
                 {hours.map(h => (
-                  <div key={h} style={{ height: hourPx }} className="border-b border-[var(--line)]/30">
-                    {hourPx >= 38 && <div className="h-1/2 border-b border-[var(--line)]/15" />}
+                  <div key={h} style={{ height: hourPx }} className="border-b border-line/30">
+                    {hourPx >= 38 && <div className="h-1/2 border-b border-line/15" />}
                   </div>
                 ))}
 
@@ -289,9 +289,9 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
                 ))}
 
                 {isToday && nowH >= startH && nowH <= endH && (
-                  <div className="absolute inset-x-0 border-t border-[var(--accent)] pointer-events-none"
+                  <div className="absolute inset-x-0 border-t border-accent pointer-events-none"
                     style={{ top: (nowH - startH) * hourPx, zIndex: 15 }}>
-                    <span className="absolute -left-1 -top-[3px] w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+                    <span className="absolute -left-1 -top-[3px] w-1.5 h-1.5 rounded-full bg-accent" />
                   </div>
                 )}
               </div>
@@ -301,7 +301,7 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
       </div>
 
       {blocks.length === 0 && (
-        <div className="mt-4 text-center text-[11px] text-[var(--t4)]">
+        <div className="mt-4 text-center text-ui text-ink-4">
           No tracked time here. Hit ▶ on a task, or click the grid to log time by hand.
         </div>
       )}

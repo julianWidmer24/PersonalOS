@@ -79,16 +79,16 @@ export function SessionModal({ session, onClose, onOpenTask }: SessionModalProps
   };
 
   const linkedTask = existing?.taskId && tasks.some(t => t.id === existing.taskId) ? existing.taskId : null;
-  const input = 'w-full px-2.5 py-1.5 rounded-md bg-[var(--bg-card)] border border-[var(--line)] text-[12.5px] text-[var(--t1)] tnum outline-none focus:border-[var(--line-hi)]';
-  const label = 'block mb-1 text-[10.5px] uppercase tracking-[0.1em] text-[var(--t3)]';
+  const input = 'w-full px-2.5 py-1.5 rounded-md bg-card border border-line text-body text-ink tnum outline-none focus:border-line-hi';
+  const label = 'block mb-1 text-meta uppercase tracking-caps text-ink-3';
 
   return (
     <ModalShell onClose={onClose}>
       <form className="p-5" onSubmit={e => { e.preventDefault(); save(); }}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-[16px] text-[var(--t1)] font-medium">{existing ? 'Edit tracked time' : 'Log time'}</h2>
+          <h2 className="text-head text-ink font-medium">{existing ? 'Edit tracked time' : 'Log time'}</h2>
           <button type="button" onClick={onClose} aria-label="Close"
-            className="w-6 h-6 rounded-md grid place-items-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--bg-card-hi)] transition-colors">✕</button>
+            className="w-6 h-6 rounded-md grid place-items-center text-ink-3 hover:text-ink hover:bg-card-hi transition-colors">✕</button>
         </div>
 
         <div className="mt-4 space-y-3.5">
@@ -106,7 +106,7 @@ export function SessionModal({ session, onClose, onOpenTask }: SessionModalProps
                 const on = kind === k.value;
                 return (
                   <button key={k.value} type="button" onClick={() => setKind(k.value)}
-                    className={`px-2.5 py-1 rounded-md border text-[11.5px] transition-colors ${on ? 'text-[var(--t1)]' : 'text-[var(--t3)] border-[var(--line)] hover:text-[var(--t2)]'}`}
+                    className={`px-2.5 py-1 rounded-md border text-ui transition-colors ${on ? 'text-ink' : 'text-ink-3 border-line hover:text-ink-2'}`}
                     style={on ? { borderColor: color, background: `${color}22` } : undefined}>
                     <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle" style={{ background: color }} />
                     {k.label}
@@ -128,14 +128,14 @@ export function SessionModal({ session, onClose, onOpenTask }: SessionModalProps
             <div>
               <label className={label} htmlFor="session-to">End</label>
               {running ? (
-                <div className="px-2.5 py-1.5 text-[12.5px] text-[var(--t3)]">running</div>
+                <div className="px-2.5 py-1.5 text-body text-ink-3">running</div>
               ) : (
                 <input id="session-to" type="time" className={input} value={to} onChange={e => setTo(e.target.value)} />
               )}
             </div>
           </div>
 
-          <div className="text-[11.5px] text-[var(--t3)] tnum">
+          <div className="text-ui text-ink-3 tnum">
             {error ?? `${fmtDuration(Math.max(0, spanMs) / 3_600_000)}${
               endAt && dateKey(endAt) !== date ? ' · ends the next day' : ''}`}
           </div>
@@ -144,18 +144,18 @@ export function SessionModal({ session, onClose, onOpenTask }: SessionModalProps
         <div className="mt-5 flex items-center gap-2">
           {existing && (
             <button type="button" onClick={() => { removeSession(existing.id); onClose(); }}
-              className="px-3 py-1.5 rounded-md text-[11.5px] text-[var(--red)] border border-[var(--line)] hover:border-[var(--red)] transition-colors">
+              className="px-3 py-1.5 rounded-md text-ui text-red border border-line hover:border-red transition-colors">
               Delete
             </button>
           )}
           {linkedTask && onOpenTask && (
             <button type="button" onClick={() => { onOpenTask(linkedTask); onClose(); }}
-              className="px-3 py-1.5 rounded-md text-[11.5px] text-[var(--t2)] border border-[var(--line)] hover:text-[var(--t1)] transition-colors">
+              className="px-3 py-1.5 rounded-md text-ui text-ink-2 border border-line hover:text-ink transition-colors">
               Open task
             </button>
           )}
           <button type="submit" disabled={!!error}
-            className="ml-auto px-3.5 py-1.5 rounded-md bg-[var(--accent)] text-[var(--bg)] text-[11.5px] font-medium disabled:opacity-40 transition-opacity">
+            className="ml-auto px-3.5 py-1.5 rounded-md bg-accent text-bg text-ui font-medium disabled:opacity-40 transition-opacity">
             {existing ? 'Save' : 'Add'}
           </button>
         </div>
