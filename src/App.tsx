@@ -4,6 +4,7 @@ import { DashProvider } from './context/DashboardContext';
 import { PhysicalProvider } from './context/PhysicalContext';
 import { useAuth } from './hooks/useAuth';
 import { TopBar } from './components/TopBar';
+import { WasteBanner } from './components/WasteButton';
 import { BottomNav } from './components/BottomNav';
 import { TaskModal } from './components/modals/TaskModal';
 import { JournalModal } from './components/modals/JournalModal';
@@ -34,6 +35,7 @@ function Layout() {
   return (
     <div className="min-h-screen bg-[var(--bg)] text-[var(--t1)] pb-16 md:pb-0">
       <TopBar />
+      <WasteBanner />
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
           <Route path="/"         element={<DashboardPage />} />

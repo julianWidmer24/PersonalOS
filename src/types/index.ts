@@ -69,7 +69,15 @@ export interface TaskSession {
   startedAt: string;
   /** ISO timestamp it stopped; null while it's still running. */
   endedAt: string | null;
+  /**
+   * 'waste' for time logged with the Wasting-time button (scrolling, YouTube)
+   * rather than against a task. Stored as category = 'waste', no task_id.
+   */
+  kind: 'task' | 'waste';
 }
+
+/** The fields of a session that can be set by hand on the tracked-time page. */
+export type SessionDraft = Pick<TaskSession, 'title' | 'tag' | 'kind' | 'startedAt' | 'endedAt'>;
 
 export type ProjectStatus = 'active' | 'paused' | 'done';
 

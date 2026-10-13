@@ -33,6 +33,8 @@ export interface SessionBlock extends TimeSpan {
   date: string;
   /** True while the stopwatch is still running. */
   running: boolean;
+  /** Task work, or time logged with the Wasting-time button. */
+  kind: TaskSession['kind'];
   /** This segment picks up from the previous day (the stint crossed midnight). */
   continuedFrom: boolean;
   /** This segment runs on into the next day. */
@@ -100,6 +102,7 @@ export function sessionBlocks(
         start,
         end,
         running,
+        kind: s.kind,
         continuedFrom: from < dayStart,
         continuesInto: to > dayEnd,
         spanStart: new Date(from),
@@ -116,11 +119,25 @@ export function sessionBlocks(
  * has been deleted falls back to the tag rather than losing its colour.
  */
 export function colorForSession(
-  block: Pick<SessionBlock, 'projectId' | 'tag'>,
+  block: Pick<SessionBlock, 'projectId' | 'tag' | 'kind'>,
   projects: Project[],
 ): KindColor {
+  if (block.kind === 'waste') return WASTE_COLOR;
   const project = block.projectId ? projects.find(p => p.id === block.projectId) : undefined;
   return colorFromHex(project?.color ?? TAG_COLORS[block.tag]?.fg ?? TAG_COLORS.personal.fg);
+}
+
+/** Wasted time is drawn in the app's alarm red, whatever else is going on. */
+export const WASTE_COLOR: KindColor = {
+  dot: '#f87171', bar: 'rgba(248,113,113,0.9)', bg: 'rgba(248,113,113,0.14)', bgSolid: 'rgba(248,113,113,0.24)',
+};
+
+/** Milliseconds of wasted time logged on the local day containing `now`. */
+export function wastedTodayMs(sessions: TaskSession[], now: number = Date.now()): number {
+  const day = startOfDay(new Date(now));
+  const hours = sessionBlocks(sessions.filter(s => s.kind === 'waste'), [day], now)
+    .reduce((sum, b) => sum + (b.end - b.start), 0);
+  return hours * MS_PER_HOUR;
 }
 
 /** Hours tracked across a set of blocks. */

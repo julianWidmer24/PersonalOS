@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import type { Task, Project, Habit, JournalEntry, Goal, ModalState, TaskCompletion, TaskSession } from '../types';
+import type { Task, Project, Habit, JournalEntry, Goal, ModalState, TaskCompletion, TaskSession, SessionDraft } from '../types';
 import { supabase } from '../lib/supabase';
 import { celebrate } from '../lib/celebrate';
 import { taskElapsedMs } from '../lib/dashboardHelpers';
@@ -194,7 +194,18 @@ function rowToSession(row: any): TaskSession {
     projectId: row.project_id ?? null,
     startedAt: String(row.started_at),
     endedAt:   row.ended_at ? String(row.ended_at) : null,
+    kind:      row.category === WASTE_CATEGORY ? 'waste' : 'task',
   };
+}
+
+/**
+ * Wasted time shares the session table with task stints: no task_id, and this
+ * in `category`. The column has no CHECK constraint, so no migration needed.
+ */
+const WASTE_CATEGORY = 'waste';
+
+function sessionCategory(s: Pick<TaskSession, 'kind' | 'tag'>): string {
+  return s.kind === 'waste' ? WASTE_CATEGORY : tagToCategory(s.tag);
 }
 
 /** A task's clock stopped now, with the running stint banked into its total. */
@@ -329,6 +340,14 @@ interface DashboardApi {
   doneByDay: Map<string, number>;
   /** Every tracked stint in the recent past, newest first; open ones included. */
   sessions: TaskSession[];
+  /** The wasted-time stint running right now, if the button has been pressed. */
+  wasteSession: TaskSession | null;
+  startWasting: () => void;
+  stopWasting: () => void;
+  /** Log a stint by hand on the tracked-time page. */
+  addSession: (draft: SessionDraft) => void;
+  updateSession: (id: string, patch: Partial<SessionDraft>) => void;
+  removeSession: (id: string) => void;
   modal: ModalState;
   setModal: (m: ModalState) => void;
 
@@ -827,7 +846,7 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
     const tempId = 'tmp-session-' + Math.random().toString(36).slice(2, 10);
     const optimistic: TaskSession = {
       id: tempId, taskId: task.id, title: task.title, tag: task.tag,
-      projectId: task.projectId, startedAt: at, endedAt: null,
+      projectId: task.projectId, startedAt: at, endedAt: null, kind: 'task',
     };
     sessionsRef.current = [optimistic, ...sessionsRef.current];
     setSessions(ss => [optimistic, ...ss]);
@@ -880,6 +899,108 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
           : rows().update({ ended_at: at }).eq('id', open.id));
     result.then(({ error }) => { if (error) console.error('closeSession error:', error); });
   }, []);
+
+  // ── Sessions edited directly ─────────────────────────────
+  // Manual entries and wasted time have no task to hang off, so they get a
+  // client-made uuid up front. That makes undo simple: re-inserting a deleted
+  // row under its old id is exactly the row that was there.
+  const insertSessionRaw = useCallback((row: TaskSession) => {
+    sessionsRef.current = [row, ...sessionsRef.current.filter(x => x.id !== row.id)];
+    setSessions(ss => [row, ...ss.filter(x => x.id !== row.id)]);
+    supabase.from('task_sessions').insert({
+      id:         row.id,
+      user_id:    userIdRef.current,
+      task_id:    row.taskId,
+      title:      row.title,
+      category:   sessionCategory(row),
+      project_id: row.projectId,
+      started_at: row.startedAt,
+      ended_at:   row.endedAt,
+    }).then(({ error }) => {
+      if (!error) return;
+      console.error('insertSession error:', error);
+      sessionsRef.current = sessionsRef.current.filter(x => x.id !== row.id);
+      setSessions(ss => ss.filter(x => x.id !== row.id));
+    });
+  }, []);
+
+  const patchSessionRaw = useCallback((id: string, patch: Partial<SessionDraft>) => {
+    const before = sessionsRef.current.find(x => x.id === id);
+    if (!before) return;
+    const after = { ...before, ...patch };
+    sessionsRef.current = sessionsRef.current.map(x => x.id === id ? after : x);
+    setSessions(ss => ss.map(x => x.id === id ? after : x));
+    supabase.from('task_sessions').update({
+      title:      after.title,
+      category:   sessionCategory(after),
+      started_at: after.startedAt,
+      ended_at:   after.endedAt,
+    }).eq('id', id).then(({ error }) => {
+      if (error) console.error('updateSession error:', error);
+    });
+  }, []);
+
+  const deleteSessionRaw = useCallback((id: string) => {
+    sessionsRef.current = sessionsRef.current.filter(x => x.id !== id);
+    setSessions(ss => ss.filter(x => x.id !== id));
+    supabase.from('task_sessions').delete().eq('id', id).then(({ error }) => {
+      if (error) console.error('removeSession error:', error);
+    });
+  }, []);
+
+  const startWasting = useCallback(() => {
+    if (sessionsRef.current.some(x => x.kind === 'waste' && x.endedAt == null)) return;
+    insertSessionRaw({
+      id: crypto.randomUUID(), taskId: null, title: 'Wasted time', tag: 'personal',
+      projectId: null, startedAt: new Date().toISOString(), endedAt: null, kind: 'waste',
+    });
+  }, [insertSessionRaw]);
+
+  const stopWasting = useCallback(() => {
+    const open = sessionsRef.current.find(x => x.kind === 'waste' && x.endedAt == null);
+    if (!open) return;
+    const at = new Date().toISOString();
+    // Same misclick rule as a task's stopwatch.
+    if (Date.parse(at) - Date.parse(open.startedAt) < MIN_SESSION_MS) deleteSessionRaw(open.id);
+    else patchSessionRaw(open.id, { endedAt: at });
+  }, [deleteSessionRaw, patchSessionRaw]);
+
+  const addSession = useCallback((draft: SessionDraft) => {
+    const row: TaskSession = { ...draft, id: crypto.randomUUID(), taskId: null, projectId: null };
+    insertSessionRaw(row);
+    record({
+      label: `Logged “${row.title}”`,
+      undo: () => deleteSessionRaw(row.id),
+      redo: () => insertSessionRaw(row),
+    });
+  }, [insertSessionRaw, deleteSessionRaw, record]);
+
+  const updateSession = useCallback((id: string, patch: Partial<SessionDraft>) => {
+    const before = sessionsRef.current.find(x => x.id === id);
+    // A task's stint whose insert is still in flight has no row to update yet.
+    if (!before || id.startsWith('tmp-session-')) return;
+    const keys = (Object.keys(patch) as (keyof SessionDraft)[]).filter(k => patch[k] !== before[k]);
+    if (!keys.length) return;
+    const prev = Object.fromEntries(keys.map(k => [k, before[k]])) as Partial<SessionDraft>;
+    const next = Object.fromEntries(keys.map(k => [k, patch[k]])) as Partial<SessionDraft>;
+    patchSessionRaw(id, next);
+    record({
+      label: `Edited “${before.title}” block`,
+      undo: () => patchSessionRaw(id, prev),
+      redo: () => patchSessionRaw(id, next),
+    });
+  }, [patchSessionRaw, record]);
+
+  const removeSession = useCallback((id: string) => {
+    const before = sessionsRef.current.find(x => x.id === id);
+    if (!before || id.startsWith('tmp-session-')) return;
+    deleteSessionRaw(id);
+    record({
+      label: `Deleted “${before.title}” block`,
+      undo: () => insertSessionRaw(before),
+      redo: () => deleteSessionRaw(id),
+    });
+  }, [deleteSessionRaw, insertSessionRaw, record]);
 
   // Every task edit funnels through here: merge the fields into the latest copy
   // of the task, then persist only the columns that actually changed. Side
@@ -1395,10 +1516,13 @@ export function DashProvider({ children }: { children: React.ReactNode }) {
   // Recomputed only when a task or a completion moves — the KPI counter and the
   // distribution chart both read it, so it's derived once here.
   const doneByDay = useMemo(() => countsByDay(completions, tasks), [completions, tasks]);
+  const wasteSession = useMemo(
+    () => sessions.find(x => x.kind === 'waste' && x.endedAt == null) ?? null, [sessions]);
 
   const api: DashboardApi = {
     tasks, setTasks, habits, setHabits, journal, setJournal,
     projects, setProjects, goals, completions, doneByDay, sessions, modal, setModal,
+    wasteSession, startWasting, stopWasting, addSession, updateSession, removeSession,
     toggleTask, starTask, toggleTaskProgress, toggleHabit, reorderTasks,
     addTask, updateTask, removeTask, addJournal,
     addHabit, updateHabit, removeHabit,

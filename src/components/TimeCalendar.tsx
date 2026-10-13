@@ -6,6 +6,8 @@ import type { SessionBlock } from '../lib/taskSessions';
 import { startOfDay, dateKey } from '../lib/taskStats';
 import { Card } from './shared/Card';
 import { Tabs } from './shared/Tabs';
+import { SessionModal } from './modals/SessionModal';
+import type { SessionDraft, TaskSession } from '../types';
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -47,12 +49,14 @@ function Block({ block: b, left, width, crowded, z, startH, hourPx, color, onOpe
   const spanMs = b.spanEnd.getTime() - b.spanStart.getTime();
   const tip =
     `${b.title} · ${fmtRange(b.start, b.end)} · ${fmtDuration(spanMs / 3_600_000)}` +
+    (b.kind === 'waste' ? ' · wasted' : '') +
     (b.running ? ' · running' : '') +
     (b.continuedFrom || b.continuesInto ? ' · spans midnight' : '');
 
   return (
     <button
-      onClick={() => onOpen(b)}
+      // The column behind a block opens a new entry; this one edits the block.
+      onClick={e => { e.stopPropagation(); onOpen(b); }}
       title={tip}
       aria-label={tip}
       className="pos-event absolute text-left px-1 py-[1px] overflow-hidden"
@@ -61,7 +65,11 @@ function Block({ block: b, left, width, crowded, z, startH, hourPx, color, onOpe
         height: h,
         left: `calc(${left * 100}% + 1px)`,
         width: `calc(${width * 100}% - 2px)`,
-        background: crowded ? color.bgSolid : color.bg,
+        // Wasted time is hatched as well as red, so it reads at a glance as
+        // not-work even beside a red project.
+        background: b.kind === 'waste'
+          ? `repeating-linear-gradient(-45deg, ${color.bgSolid} 0 4px, ${color.bg} 4px 8px)`
+          : crowded ? color.bgSolid : color.bg,
         borderLeft: `${crowded ? 3 : 2}px solid ${color.bar}`,
         // Square off the edge a stint runs through, so a block crossing
         // midnight reads as one piece of work split over two columns.
@@ -110,7 +118,11 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
     () => days.map((_, i) => layoutDay(blocks.filter(b => b.dayIndex === i))),
     [blocks, days],
   );
-  const perDay = useMemo(() => hoursByDay(blocks, days.length), [blocks, days.length]);
+  const workBlocks = useMemo(() => blocks.filter(b => b.kind !== 'waste'), [blocks]);
+  const wasteBlocks = useMemo(() => blocks.filter(b => b.kind === 'waste'), [blocks]);
+  const perDay = useMemo(() => hoursByDay(workBlocks, days.length), [workBlocks, days.length]);
+  const wastePerDay = useMemo(() => hoursByDay(wasteBlocks, days.length), [wasteBlocks, days.length]);
+  const [editing, setEditing] = useState<TaskSession | SessionDraft | null>(null);
 
   const hours = Array.from({ length: endH - startH }, (_, i) => startH + i);
   // Density adapts to the span on screen. Tracked time is not office hours —
@@ -131,23 +143,55 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
     return startOfDay(d).getTime();
   });
 
-  const openTask = (b: SessionBlock) => {
-    // The task is hard-deleted a day after it's finished, but its sessions
-    // stay. Only offer the modal while there's something to open.
-    if (b.taskId && tasks.some(t => t.id === b.taskId)) setModal({ kind: 'task', taskId: b.taskId });
+  const isCurrent = days.some(d => dateKey(d) === todayKeyStr);
+  const openBlock = (b: SessionBlock) => {
+    const s = sessions.find(x => x.id === b.sessionId);
+    if (s) setEditing(s);
   };
+
+  /** A fresh hour-long entry, starting at `hour` on `day` (or now-ish). */
+  const draftAt = (day: Date, hour: number): SessionDraft => {
+    const startD = new Date(day);
+    startD.setHours(0, Math.floor(hour * 4) * 15, 0, 0);
+    const endD = new Date(Math.min(startD.getTime() + 3_600_000, startOfDay(day).getTime() + 86_400_000 - 60_000));
+    return { title: '', kind: 'task', tag: 'personal', startedAt: startD.toISOString(), endedAt: endD.toISOString() };
+  };
+
+  const onColumnClick = (e: React.MouseEvent<HTMLDivElement>, day: Date) => {
+    const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+    setEditing(draftAt(day, Math.max(0, Math.min(23.75, startH + y / hourPx))));
+  };
+
+  const logNow = () => {
+    // Default to the hour that just ended, on whichever day is on screen.
+    const d = new Date(now);
+    const day = days.find(x => dateKey(x) === dateKey(d)) ?? days[0];
+    setEditing(draftAt(day, day === days[0] && !isCurrent ? 9 : Math.max(0, d.getHours() - 1)));
+  };
+
+  // The task is hard-deleted a day after it's finished, but its sessions
+  // stay. The editor only offers it while there's something to open.
+  const openTask = (taskId: string) => {
+    if (tasks.some(t => t.id === taskId)) setModal({ kind: 'task', taskId });
+  };
+
+  const workTotal = totalHours(workBlocks);
+  const wasteTotal = totalHours(wasteBlocks);
+  const kicker = [
+    workTotal > 0 ? fmtDuration(workTotal) : '',
+    wasteTotal > 0 ? `${fmtDuration(wasteTotal)} wasted` : '',
+  ].filter(Boolean).join(' · ') || 'nothing yet';
 
   const rangeLabel = days.length === 1
     ? days[0].toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
     : `${days[0].toLocaleDateString([], { month: 'short', day: 'numeric' })} – ${
         days[6].toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
-  const isCurrent = days.some(d => dateKey(d) === todayKeyStr);
   const cols = `${gutter}px repeat(${days.length}, minmax(0, 1fr))`;
 
   return (
     <Card
       title="Time tracked"
-      kicker={totalHours(blocks) > 0 ? fmtDuration(totalHours(blocks)) : 'nothing yet'}
+      kicker={kicker}
       // Only the tabs live in the header: Card pins its action row with
       // shrink-0, so anything more forces the whole card wider than a phone.
       action={<Tabs tabs={['Day', 'Week']} value={view} onChange={setView} />}
@@ -167,6 +211,12 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
             Today
           </button>
         )}
+        <button
+          onClick={logNow}
+          className="ml-auto px-2 py-0.5 rounded-md border border-[var(--line)] text-[10px] text-[var(--t3)] hover:text-[var(--t1)] transition-colors"
+        >
+          + Log time
+        </button>
       </div>
 
       <div className="flex flex-col">
@@ -190,6 +240,11 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
                 <div className="mt-0.5 text-[9px] tnum text-[var(--t4)]">
                   {perDay[i] > 0 ? fmtDuration(perDay[i]) : '·'}
                 </div>
+                {wastePerDay[i] > 0 && (
+                  <div className="text-[9px] tnum text-[var(--red)]" title="Wasted">
+                    −{fmtDuration(wastePerDay[i])}
+                  </div>
+                )}
               </div>
             );
           })}
@@ -209,7 +264,9 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
             const isToday = dateKey(d) === todayKeyStr;
             return (
               <div key={dateKey(d)}
-                className={`relative border-l border-[var(--line)]/60 ${isToday ? 'bg-[var(--accent-2)]/40' : ''}`}>
+                onClick={e => onColumnClick(e, d)}
+                title="Click to log time here"
+                className={`relative border-l border-[var(--line)]/60 cursor-copy ${isToday ? 'bg-[var(--accent-2)]/40' : ''}`}>
                 {hours.map(h => (
                   <div key={h} style={{ height: hourPx }} className="border-b border-[var(--line)]/30">
                     {hourPx >= 38 && <div className="h-1/2 border-b border-[var(--line)]/15" />}
@@ -227,7 +284,7 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
                     startH={startH}
                     hourPx={hourPx}
                     color={colorForSession(b, projects)}
-                    onOpen={openTask}
+                    onOpen={openBlock}
                   />
                 ))}
 
@@ -245,8 +302,18 @@ export function TimeCalendar({ page = false }: { page?: boolean }) {
 
       {blocks.length === 0 && (
         <div className="mt-4 text-center text-[11px] text-[var(--t4)]">
-          No tracked time here. Hit ▶ on a task and its block appears on this grid.
+          No tracked time here. Hit ▶ on a task, or click the grid to log time by hand.
         </div>
+      )}
+
+      {editing && (
+        <SessionModal
+          // A new draft each time the grid is clicked, so the form resets.
+          key={'id' in editing ? editing.id : editing.startedAt}
+          session={editing}
+          onClose={() => setEditing(null)}
+          onOpenTask={openTask}
+        />
       )}
     </Card>
   );

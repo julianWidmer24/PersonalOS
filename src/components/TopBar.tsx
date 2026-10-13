@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useDashboard } from '../context/DashboardContext';
 import { UNDO_KEY, REDO_KEY } from '../lib/dashboardHelpers';
+import { WasteButton } from './WasteButton';
 
 const NAV_ITEMS = [
   { label: 'Today',    to: '/'          },
@@ -64,6 +65,7 @@ export function TopBar() {
           </nav>
         </div>
         <div className="flex items-center gap-2">
+          <WasteButton />
           <div className="flex items-center">
             <HistoryBtn
               onClick={undo}
